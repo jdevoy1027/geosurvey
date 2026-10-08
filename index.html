@@ -179,8 +179,12 @@
    protection is the URL restriction on the token itself, which is why a new
    origin has to be added to it before this page will draw. See README.md.
    =========================================================================== */
+// This project's own token (note "https://geosurvey.biz" in the Mapbox account),
+// allowed on https://geosurvey.biz, https://www.geosurvey.biz and
+// http://localhost:8080. Separate from the token the other sites use, so it can
+// be rotated or revoked here without taking them down.
 mapboxgl.accessToken = atob(
-  'cGsuZXlKMUlqb2lhbVJsZG05NUlpd2lZU0k2SW1OdGN6bGljVE0xZURCamRHWXpNRzlsYkhZMmVub3hPRFFpZlEuWTBrbWgxTzNWbVpuV2tQX0lMaWJuQQ==');
+  'cGsuZXlKMUlqb2lhbVJsZG05NUlpd2lZU0k2SW1OdGRYbzRkM1IwTlRBd05YWXllRzloYWpKME1XczFiMnNpZlEuQjF1N3hxbVYtd1dud2RaN0I4b09WUQ==');
 
 var BOOT = document.getElementById('boot');
 function bootFail(html) { BOOT.hidden = false; BOOT.querySelector('.msg').innerHTML = html; }
