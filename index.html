@@ -1344,7 +1344,11 @@ function openSheet(feature, fix) {
     }
     html += '</div>';
   });
+  // The organ row is a CHOICE, not an action -- it says what is in the photo.
+  // Unlabelled, five buttons sitting above Identify read as five things to
+  // press, and "Auto" gets tapped expecting it to do the identifying.
   html += '<div class="fld"><label>Photos</label><div class="shots" id="shots"></div>' +
+          '<div class="seglab" style="margin:11px 2px 5px">What is in the photo?</div>' +
           '<div class="organs" id="organs">' +
           ORGANS.map(function (o) {
             return '<button type="button" data-o="' + o[0] + '" aria-pressed="false">' +
