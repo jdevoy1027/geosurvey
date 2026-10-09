@@ -111,20 +111,93 @@ with a permission error that reads as the user having denied it. Options:
 - `npx localtunnel --port 8080`, or Tailscale/ngrok, for an https URL — remember
   to add that origin to the token too.
 
+## Point capture
+
+Green **+** records a point at the current fix. Press and hold on the map to
+place one somewhere you cannot stand. Tap a recorded point to edit or delete it.
+**List** shows them newest first and flies to whichever you pick; **Export**
+hands out a GeoJSON file.
+
+### Changing the form
+
+The form *is* this array, near the bottom of `index.html`:
+
+```js
+var FIELDS = [
+  { key: 'station', label: 'Station', type: 'text', required: true, auto: nextStation },
+  { key: 'type',    label: 'Observation', type: 'select',
+    options: ['Outcrop', 'Soil', 'Water', 'Structure', 'Sample', 'Photo point', 'Other'] },
+  { key: 'notes',   label: 'Notes', type: 'textarea' }
+];
+```
+
+Add, rename or remove a field there and the form, the stored records and the
+export all follow — nothing else needs editing. `type` is `text`, `select`,
+`number` or `textarea`; `auto` is a function returning the value to prefill on a
+new point. The fields above are a placeholder for whatever you actually record;
+they are a guess, not a recommendation.
+
+Position, accuracy and time are deliberately **not** in `FIELDS`. They are
+recorded automatically and cannot be edited — a field record whose coordinates
+can be typed over is not a measurement.
+
+### Two things it is careful about
+
+**The fix is snapshotted when you press +**, not read again when you save.
+Filling in a form takes a minute, and the position drifts in that minute; the
+point belongs where you stood when you pressed the button. Verified: with the
+form open, moving the simulated position 0.1° away left the saved coordinates
+unchanged.
+
+**A placed point is not a measurement.** Press-and-hold points are stored with
+`src: "placed"` and a null accuracy, drawn as a hollow ring rather than a solid
+dot, and the form says "placed by hand — no measured accuracy". They should
+never be mistaken later for somewhere you stood.
+
+Accuracy is coloured in the form as well as the readout: green at 10 m or
+better, red at 30 m or worse.
+
+### What a record looks like
+
+```json
+{
+  "type": "Feature",
+  "properties": {
+    "src": "gps", "at": "2026-10-09T03:57:16.703Z",
+    "station": "S001", "type": "Outcrop", "notes": "Sandstone, cross-bedded",
+    "acc": 4.7, "alt": 58.2
+  },
+  "geometry": { "type": "Point", "coordinates": [-118.212945, 34.004312] }
+}
+```
+
+`at` is when it was recorded, `acc` the GPS accuracy in metres, `alt` the
+altitude in metres, `src` either `gps` or `placed`. Coordinates are rounded to
+six decimals — about 0.1 m, far finer than any phone fix.
+
+### Storage
+
+Everything is held in `localStorage` as one GeoJSON FeatureCollection, which is
+also exactly what Export writes, so exporting is a serialise rather than a
+conversion and there is no second representation to drift.
+
+**It survives a reload and a force-quit. It does not survive clearing site
+data**, and Safari can evict storage from a site you have not opened in a while.
+**Export at the end of each day.** A quota failure is reported rather than
+swallowed, but the honest protection is getting the data off the phone.
+
+Export prefers the iOS share sheet when the browser supports sharing files —
+Mail, AirDrop, iCloud directly — and falls back to a download otherwise, since a
+download on iOS lands in Files and is then awkward to move anywhere useful.
+
 ## Not built yet
 
-The whole point of the application: recording observations. When you are ready,
-the pieces are roughly
-
-- a point capture button that stamps the current fix with its accuracy,
-- a form for the attributes being collected, which needs to know what they are,
-- photos with the point, which on iOS means `<input type="file" accept="image/*" capture="environment">`,
-- local persistence (IndexedDB) so a day in the field survives a reload and a
-  dead zone, and
-- export — GeoJSON out, and whatever route gets it into the desktop GIS.
-
-Worth deciding early: whether this needs to work with **no signal at all**. That
-is the difference between a web page and an offline-capable one, and it changes
-the base map story completely — NAIP is rendered on demand and cannot work
-offline, so offline means pre-caching tiles for a known survey area before
-leaving.
+- **Photos.** `<input type="file" accept="image/*" capture="environment">` opens
+  the camera, but images cannot go in `localStorage` — that means IndexedDB and
+  a real storage budget.
+- **Offline.** Worth deciding before this gets used in anger. NAIP is rendered
+  on demand and cannot work without a connection, so offline means pre-caching
+  tiles for a known survey area before leaving, plus a service worker for the
+  page itself. It is the difference between a web page and an application.
+- **Getting points into the desktop GIS.** Export produces GeoJSON, which the
+  faults map already reads; nothing automates the hand-off yet.

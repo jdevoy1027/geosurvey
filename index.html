@@ -126,6 +126,118 @@
   .mapboxgl-ctrl-bottom-right { right: calc(env(safe-area-inset-right, 0px) + 2px); }
   .mapboxgl-ctrl-attrib { font-size: 10px; }
 
+  /* ── capture ───────────────────────────────────────────────────────────── */
+  .cap {
+    position: fixed; right: 10px; z-index: 5;
+    bottom: calc(var(--above) + 86px);
+    width: 56px; height: 56px; padding: 0;
+    border: 1px solid var(--accent); border-radius: 50%;
+    background: var(--accent); color: #fff;
+    box-shadow: 0 1px 2px rgba(0,0,0,.05), 0 6px 18px rgba(0,0,0,.2);
+    cursor: pointer; touch-action: manipulation;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .cap svg { width: 26px; height: 26px; display: block; }
+  .cap:disabled { background: #fff; color: #b4b4ae; border-color: var(--line); }
+
+  /* Count and export, only once something has been recorded. */
+  .tally {
+    display: none; align-items: center; gap: 8px;
+    margin: 8px 2px 1px; padding-top: 8px; border-top: 1px solid #ececE6;
+    font-size: 12px; color: var(--ink-soft);
+  }
+  .tally.on { display: flex; }
+  .tally b { color: var(--ink); font-weight: 640; }
+  .tally .sp { flex: 1; }
+  .tally button {
+    font: inherit; font-size: 12.5px; font-weight: 560; min-height: 32px; padding: 0 11px;
+    border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink);
+    cursor: pointer; touch-action: manipulation;
+  }
+
+  /* ── the attribute sheet ───────────────────────────────────────────────── */
+  .scrim {
+    position: fixed; inset: 0; z-index: 10; background: rgba(20,20,20,.38);
+    display: none;
+  }
+  .scrim.on { display: block; }
+  .sheet {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 11;
+    background: #fff; border-radius: 16px 16px 0 0;
+    box-shadow: 0 -8px 34px rgba(0,0,0,.22);
+    /* The keyboard shrinks the visual viewport rather than the layout viewport
+       on iOS, so the sheet is capped at a share of the window and scrolls
+       inside itself. Without this the Save button ends up under the keyboard
+       with no way to reach it. */
+    max-height: 86dvh; display: none; flex-direction: column;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  @supports not (max-height: 86dvh) { .sheet { max-height: 86vh; } }
+  .sheet.on { display: flex; }
+  .sheet h2 {
+    margin: 0; padding: 15px 16px 11px; font-size: 15.5px; font-weight: 640;
+    letter-spacing: -.01em; border-bottom: 1px solid #ececE6;
+    display: flex; align-items: center; gap: 9px;
+  }
+  .sheet h2 .sp { flex: 1; }
+  .sheet h2 .x {
+    width: 30px; height: 30px; padding: 0; font: 600 17px/1 inherit;
+    border: 1px solid var(--line); border-radius: 7px; background: #fff;
+    color: var(--ink-soft); cursor: pointer; touch-action: manipulation;
+  }
+  .sheet .body { overflow-y: auto; -webkit-overflow-scrolling: touch; padding: 13px 16px 4px; }
+  .sheet .fld { margin-bottom: 13px; }
+  .sheet label {
+    display: block; font-size: 11px; font-weight: 600; letter-spacing: .05em;
+    text-transform: uppercase; color: #85857e; margin-bottom: 5px;
+  }
+  .sheet input, .sheet select, .sheet textarea {
+    width: 100%; font: inherit;
+    /* 16px exactly. Anything smaller and iOS zooms the page when the field is
+       focused, and never zooms back out. */
+    font-size: 16px;
+    padding: 10px 11px; border: 1px solid #d0d0ca; border-radius: 9px;
+    background: #fff; color: var(--ink); -webkit-appearance: none; appearance: none;
+  }
+  .sheet select {
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%2385857e' stroke-width='1.8' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 11px center; padding-right: 32px;
+  }
+  .sheet textarea { min-height: 76px; resize: vertical; }
+  .sheet input:focus, .sheet select:focus, .sheet textarea:focus {
+    outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent);
+  }
+  .meta {
+    font-size: 11.5px; line-height: 1.5; color: var(--ink-soft);
+    background: #f6f6f2; border: 1px solid #ececE6; border-radius: 9px;
+    padding: 9px 11px; margin-bottom: 13px; font-variant-numeric: tabular-nums;
+  }
+  .meta b { color: var(--ink); font-weight: 600; }
+  .meta .acc-good { color: var(--accent); font-weight: 600; }
+  .meta .acc-poor { color: var(--warn); font-weight: 600; }
+  .acts {
+    display: flex; gap: 8px; padding: 11px 16px calc(11px + env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid #ececE6; background: #fff;
+  }
+  .acts button {
+    font: inherit; font-size: 14px; font-weight: 560; min-height: 46px; padding: 0 14px;
+    border-radius: 10px; cursor: pointer; touch-action: manipulation; border: 1px solid var(--line);
+    background: #fff; color: var(--ink);
+  }
+  .acts .save { flex: 1; background: var(--accent); border-color: var(--accent); color: #fff; }
+  .acts .del { color: var(--warn); border-color: #e8cdc7; }
+
+  /* The saved-point list */
+  .plist { padding: 4px 0 10px; }
+  .prow {
+    display: flex; gap: 10px; align-items: baseline; width: 100%; text-align: left;
+    padding: 11px 16px; border: 0; border-bottom: 1px solid #f1f1ec;
+    background: #fff; font: inherit; cursor: pointer; touch-action: manipulation;
+  }
+  .prow b { font-weight: 640; font-size: 14px; }
+  .prow .t { color: var(--ink-soft); font-size: 12px; flex: 1; }
+  .prow .w { color: var(--ink-soft); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+
   .boot {
     position: fixed; inset: 0; z-index: 9; display: flex;
     align-items: center; justify-content: center; padding: 24px;
@@ -155,6 +267,13 @@
   </svg>
 </button>
 
+<button class="cap" id="cap" type="button" aria-label="Record a point here" title="Record a point here">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+       stroke-linecap="round" aria-hidden="true">
+    <path d="M12 5v14M5 12h14"></path>
+  </svg>
+</button>
+
 <div class="bar">
   <div class="seg" role="group" aria-label="Base map">
     <button id="b-light" type="button" aria-pressed="false">Light</button>
@@ -162,6 +281,20 @@
     <button id="b-naip"  type="button" aria-pressed="true">Aerial</button>
   </div>
   <div class="note" id="base-note"></div>
+  <div class="tally" id="tally">
+    <span><b id="tally-n">0</b> points</span>
+    <span class="sp"></span>
+    <button id="btn-list" type="button">List</button>
+    <button id="btn-export" type="button">Export</button>
+  </div>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+  <h2 id="sheet-title">Point<span class="sp"></span>
+    <button class="x" id="sheet-x" type="button" aria-label="Close">&times;</button></h2>
+  <div class="body" id="sheet-body"></div>
+  <div class="acts" id="sheet-acts"></div>
 </div>
 
 <script src="https://api.mapbox.com/mapbox-gl-js/v3.9.0/mapbox-gl.js"></script>
@@ -494,10 +627,316 @@ map.on('dragstart', function () {
   if (GEO.following) { GEO.following = false; setLocState('on'); }
 });
 
+/* ===========================================================================
+   Point capture
+   ---------------------------------------------------------------------------
+   THE FORM IS THIS ONE ARRAY. Add, remove or rename a field here and the form,
+   the saved records and the export all follow. Nothing below needs touching.
+
+     key       what the attribute is called in the exported GeoJSON
+     label     what the form shows
+     type      text | select | number | textarea
+     options   for select
+     required  blocks Save when empty
+     auto      a function returning the value to prefill on a NEW point
+
+   Position, accuracy and time are NOT in here. They are recorded automatically
+   on every point and must not be editable -- a field record whose coordinates
+   can be typed over is not a measurement.
+   ========================================================================= */
+var FIELDS = [
+  { key: 'station', label: 'Station', type: 'text', required: true, auto: nextStation },
+  { key: 'type', label: 'Observation', type: 'select',
+    options: ['Outcrop', 'Soil', 'Water', 'Structure', 'Sample', 'Photo point', 'Other'] },
+  { key: 'notes', label: 'Notes', type: 'textarea' }
+];
+
+var PT_STORE = 'geosurvey.points.v1';
+
+/* The store is a GeoJSON FeatureCollection, held as one. Keeping the working
+   shape and the export shape the same means export is a serialise rather than a
+   conversion, and there is no second representation to drift. */
+var PTS = (function () {
+  try {
+    var o = JSON.parse(localStorage.getItem(PT_STORE) || 'null');
+    if (o && o.type === 'FeatureCollection' && Array.isArray(o.features)) return o;
+  } catch (e) { /* fall through to empty */ }
+  return { type: 'FeatureCollection', features: [] };
+})();
+
+function savePts() {
+  try {
+    localStorage.setItem(PT_STORE, JSON.stringify(PTS));
+  } catch (e) {
+    // Quota. Worth saying out loud rather than losing the day's work silently.
+    alert('Could not save — the browser storage is full.\n\n' +
+          'Export what is recorded before adding more.');
+  }
+}
+
+function nextStation() {
+  var n = 0;
+  PTS.features.forEach(function (f) {
+    var m = /^S(\d+)$/.exec(String(f.properties.station || ''));
+    if (m) n = Math.max(n, +m[1]);
+  });
+  return 'S' + String(n + 1).padStart(3, '0');
+}
+
+function ptLayers() {
+  if (!map.getSource('pts')) map.addSource('pts', { type: 'geojson', data: PTS });
+  if (!map.getLayer('pt-dot')) {
+    map.addLayer({
+      id: 'pt-dot', type: 'circle', source: 'pts',
+      paint: {
+        'circle-radius': 7,
+        'circle-color': '#b8532a',
+        'circle-stroke-color': '#ffffff',
+        // A hollow ring for a point placed by hand rather than stood on. The
+        // two are not the same evidence and the map should not pretend they are.
+        'circle-stroke-width': ['case', ['==', ['get', 'src'], 'placed'], 3.5, 2.5],
+        'circle-opacity': ['case', ['==', ['get', 'src'], 'placed'], 0.45, 1]
+      }
+    });
+  }
+  if (!map.getLayer('pt-label')) {
+    map.addLayer({
+      id: 'pt-label', type: 'symbol', source: 'pts',
+      minzoom: 14,
+      layout: {
+        'text-field': ['get', 'station'],
+        'text-font': ['DIN Pro Bold', 'Arial Unicode MS Bold'],
+        'text-size': 12, 'text-offset': [0, 1.1], 'text-anchor': 'top',
+        'text-allow-overlap': false
+      },
+      paint: { 'text-color': '#8a3d1c', 'text-halo-color': '#ffffff', 'text-halo-width': 1.6 }
+    });
+  }
+}
+
+function refreshPts() {
+  if (map.getSource('pts')) map.getSource('pts').setData(PTS);
+  var n = PTS.features.length;
+  document.getElementById('tally-n').textContent = n;
+  document.getElementById('tally').className = 'tally' + (n ? ' on' : '');
+}
+
+/* ── the sheet ───────────────────────────────────────────────────────────── */
+var SHEET = document.getElementById('sheet');
+var SCRIM = document.getElementById('scrim');
+var editing = null;          // the feature being edited, or null for a new one
+var pendingFix = null;       // position captured when the form opened
+
+function closeSheet() {
+  SHEET.className = 'sheet'; SCRIM.className = 'scrim';
+  editing = null; pendingFix = null;
+}
+SCRIM.addEventListener('click', closeSheet);
+document.getElementById('sheet-x').addEventListener('click', closeSheet);
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+function accHtml(acc) {
+  if (acc == null) return '<b>placed by hand</b> — no measured accuracy';
+  var cls = acc <= 10 ? 'acc-good' : acc >= 30 ? 'acc-poor' : '';
+  return 'accuracy <span class="' + cls + '">±' + (acc < 10 ? acc.toFixed(1) : Math.round(acc)) + ' m</span>';
+}
+
+function openSheet(feature, fix) {
+  editing = feature || null;
+  pendingFix = fix || null;
+  var p = feature ? feature.properties : {};
+  var pos = feature ? {
+    lon: feature.geometry.coordinates[0], lat: feature.geometry.coordinates[1],
+    acc: (p.acc == null ? null : p.acc), at: p.at
+  } : { lon: fix.lon, lat: fix.lat, acc: fix.acc, at: null };
+
+  document.getElementById('sheet-title').firstChild.nodeValue =
+    feature ? ('Point ' + (p.station || '')) : 'New point';
+
+  var html = '<div class="meta"><b>' + pos.lat.toFixed(6) + '</b>, <b>' + pos.lon.toFixed(6) +
+             '</b><br>' + accHtml(pos.acc) +
+             (pos.at ? '<br>recorded ' + esc(new Date(pos.at).toLocaleString()) : '') + '</div>';
+
+  FIELDS.forEach(function (f) {
+    var v = feature ? (p[f.key] == null ? '' : p[f.key])
+                    : (typeof f.auto === 'function' ? f.auto() : '');
+    html += '<div class="fld"><label for="f-' + f.key + '">' + esc(f.label) +
+            (f.required ? ' *' : '') + '</label>';
+    if (f.type === 'select') {
+      html += '<select id="f-' + f.key + '"><option value=""></option>' +
+        (f.options || []).map(function (o) {
+          return '<option' + (String(v) === o ? ' selected' : '') + '>' + esc(o) + '</option>';
+        }).join('') + '</select>';
+    } else if (f.type === 'textarea') {
+      html += '<textarea id="f-' + f.key + '" rows="3">' + esc(v) + '</textarea>';
+    } else {
+      html += '<input id="f-' + f.key + '" type="' + (f.type === 'number' ? 'number' : 'text') +
+              '" value="' + esc(v) + '"' +
+              // Station codes are case-sensitive and not words, so the phone
+              // must not autocorrect or capitalise them.
+              ' autocapitalize="none" autocorrect="off" spellcheck="false">';
+    }
+    html += '</div>';
+  });
+  document.getElementById('sheet-body').innerHTML = html;
+
+  document.getElementById('sheet-acts').innerHTML =
+    (feature ? '<button type="button" class="del" id="a-del">Delete</button>' : '') +
+    '<button type="button" class="save" id="a-save">Save</button>';
+
+  document.getElementById('a-save').addEventListener('click', saveSheet);
+  var del = document.getElementById('a-del');
+  if (del) del.addEventListener('click', deleteSheet);
+
+  SHEET.className = 'sheet on'; SCRIM.className = 'scrim on';
+}
+
+function saveSheet() {
+  var vals = {};
+  for (var i = 0; i < FIELDS.length; i++) {
+    var f = FIELDS[i];
+    var el = document.getElementById('f-' + f.key);
+    var v = el ? String(el.value).trim() : '';
+    if (f.required && !v) {
+      alert(f.label + ' is required.');
+      if (el) el.focus();
+      return;
+    }
+    vals[f.key] = v;
+  }
+
+  if (editing) {
+    FIELDS.forEach(function (f) { editing.properties[f.key] = vals[f.key]; });
+    editing.properties.edited = new Date().toISOString();
+  } else {
+    var props = { src: pendingFix.src, at: new Date().toISOString() };
+    FIELDS.forEach(function (f) { props[f.key] = vals[f.key]; });
+    // Measured values live beside the typed ones, not inside the form.
+    props.acc = pendingFix.acc;
+    props.alt = pendingFix.alt == null ? null : Math.round(pendingFix.alt * 10) / 10;
+    PTS.features.push({
+      type: 'Feature', properties: props,
+      // Six decimals is about 0.1 m — finer than any phone GPS, and far finer
+      // than the accuracy figure recorded alongside it.
+      geometry: { type: 'Point', coordinates: [+pendingFix.lon.toFixed(6), +pendingFix.lat.toFixed(6)] }
+    });
+  }
+  savePts(); refreshPts(); closeSheet();
+}
+
+function deleteSheet() {
+  if (!editing) return;
+  if (!confirm('Delete point ' + (editing.properties.station || '') + '?')) return;
+  PTS.features = PTS.features.filter(function (f) { return f !== editing; });
+  savePts(); refreshPts(); closeSheet();
+}
+
+/* ── recording ───────────────────────────────────────────────────────────── */
+document.getElementById('cap').addEventListener('click', function () {
+  if (!GEO.last) {
+    alert('No position yet.\n\nTap the locate button first, or press and hold ' +
+          'on the map to place a point by hand.');
+    return;
+  }
+  // The fix is snapshotted HERE, not read again at save. Filling the form takes
+  // a minute, in which the position drifts -- the point belongs where you stood
+  // when you pressed the button, not where you drifted to while typing.
+  openSheet(null, {
+    lon: GEO.last.lon, lat: GEO.last.lat, acc: GEO.last.acc, alt: GEO.last.alt, src: 'gps'
+  });
+});
+
+// Press and hold to place a point somewhere you cannot stand -- across a fence,
+// mid-channel. GL JS raises contextmenu for a long press on touch. Recorded
+// with src 'placed' and no accuracy, so it is never mistaken for a measurement.
+map.on('contextmenu', function (e) {
+  openSheet(null, { lon: e.lngLat.lng, lat: e.lngLat.lat, acc: null, alt: null, src: 'placed' });
+});
+
+map.on('click', 'pt-dot', function (e) {
+  var hit = e.features && e.features[0];
+  if (!hit) return;
+  // queryRenderedFeatures returns a copy, so the stored feature is found by
+  // identity of its values rather than used directly -- editing the copy would
+  // change nothing.
+  var st = hit.properties.station, at = hit.properties.at;
+  var f = PTS.features.filter(function (x) {
+    return x.properties.station === st && x.properties.at === at;
+  })[0];
+  if (f) openSheet(f, null);
+});
+map.on('mouseenter', 'pt-dot', function () { map.getCanvas().style.cursor = 'pointer'; });
+map.on('mouseleave', 'pt-dot', function () { map.getCanvas().style.cursor = ''; });
+
+/* ── list and export ─────────────────────────────────────────────────────── */
+document.getElementById('btn-list').addEventListener('click', function () {
+  if (!PTS.features.length) return;
+  document.getElementById('sheet-title').firstChild.nodeValue =
+    PTS.features.length + ' points';
+  // Newest first: the one just recorded is the one most likely wanted.
+  var rows = PTS.features.slice().sort(function (a, b) {
+    return String(b.properties.at || '').localeCompare(String(a.properties.at || ''));
+  });
+  document.getElementById('sheet-body').innerHTML = '<div class="plist">' +
+    rows.map(function (f) {
+      var p = f.properties;
+      return '<button class="prow" type="button" data-st="' + esc(p.station) +
+             '" data-at="' + esc(p.at) + '">' +
+             '<b>' + esc(p.station || '—') + '</b>' +
+             '<span class="t">' + esc(p.type || '') + '</span>' +
+             '<span class="w">' + (p.acc == null ? 'placed' : '±' + Math.round(p.acc) + ' m') +
+             '</span></button>';
+    }).join('') + '</div>';
+  document.getElementById('sheet-acts').innerHTML =
+    '<button type="button" class="save" id="a-close">Done</button>';
+  document.getElementById('a-close').addEventListener('click', closeSheet);
+  // Assigned, not added: List can be opened repeatedly, and addEventListener
+  // would stack a new handler each time so one tap fired several.
+  document.getElementById('sheet-body').onclick = function (ev) {
+    var b = ev.target.closest ? ev.target.closest('.prow') : null;
+    if (!b) return;
+    var f = PTS.features.filter(function (x) {
+      return String(x.properties.station) === b.getAttribute('data-st') &&
+             String(x.properties.at) === b.getAttribute('data-at');
+    })[0];
+    if (!f) return;
+    map.easeTo({ center: f.geometry.coordinates, zoom: Math.max(map.getZoom(), 17), duration: 600 });
+    openSheet(f, null);
+  };
+  SHEET.className = 'sheet on'; SCRIM.className = 'scrim on';
+});
+
+document.getElementById('btn-export').addEventListener('click', function () {
+  if (!PTS.features.length) return;
+  var name = 'geosurvey-' + new Date().toISOString().slice(0, 10) + '.geojson';
+  var text = JSON.stringify(PTS, null, 2);
+  var file = new File([text], name, { type: 'application/geo+json' });
+
+  // Share first on a phone: a download lands in Files and is then hard to get
+  // anywhere useful, where the share sheet reaches Mail, AirDrop and iCloud
+  // directly. Falls back to a download where sharing a file is unsupported.
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    navigator.share({ files: [file], title: name }).catch(function () { /* cancelled */ });
+    return;
+  }
+  var url = URL.createObjectURL(new Blob([text], { type: 'application/geo+json' }));
+  var a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+});
+
 /* ── start ──────────────────────────────────────────────────────────────── */
 map.on('load', function () {
   addBaseLayers();
   setBase(baseMap);
+  ptLayers();
+  refreshPts();
   BOOT.hidden = true;
 });
 
