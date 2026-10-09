@@ -4,9 +4,9 @@ A field-data GIS for the phone. Same mapping stack as taxliencode.pro — Mapbox
 GL JS 3.9.0, no build step, one self-contained `index.html` — but laid out for a
 phone held in one hand rather than a desktop with a layer panel.
 
-This first cut is the base to build on: the three base maps, and a GPS fix
-reported precisely enough to judge whether a reading is worth recording. Data
-capture is not built yet.
+Three base maps, a GPS fix reported precisely enough to judge whether a reading
+is worth recording, point capture with photos, and tree identification through
+Pl@ntNet.
 
 ## What is here
 
@@ -125,9 +125,15 @@ The form *is* this array, near the bottom of `index.html`:
 ```js
 var FIELDS = [
   { key: 'station',     label: 'Station', type: 'text', required: true, auto: nextStation },
-  { key: 'type',        label: 'Observation', type: 'select', options: [...] },
+  { key: 'type',        label: 'Observation', type: 'select', options: ['Tree', 'Shrub', ...] },
   { key: 'technician',  label: 'Technician', type: 'text', auto: lastTech },
+  { key: 'species',     label: 'Species', type: 'text' },
+  { key: 'common_name', label: 'Common name', type: 'text' },
+  { key: 'dbh_in',      label: 'DBH (inches)', type: 'number' },
+  { key: 'height_ft',   label: 'Height (feet)', type: 'number' },
   { key: 'description', label: 'Description', type: 'textarea' },
+  { key: 'id_score',    label: 'ID confidence', ro: true, live: true, fill: c => c.idScore },
+  { key: 'id_source',   label: 'ID source',     ro: true, live: true, fill: c => c.idSource },
   { key: 'x_coord',     label: 'X (longitude)', ro: true, fill: c => +c.lon.toFixed(6) },
   { key: 'y_coord',     label: 'Y (latitude)',  ro: true, fill: c => +c.lat.toFixed(6) },
   { key: 'date',        label: 'Date', ro: true, fill: c => c.date },
