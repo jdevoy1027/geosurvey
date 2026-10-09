@@ -1246,10 +1246,9 @@ function pnSetKey(k) {
   } catch (e) {}
 }
 function pnAskKey() {
-  // Short on purpose. iOS truncates a long prompt() from the FRONT, so the
-  // first version lost its own title and opened mid-sentence -- the one line
-  // that said what was being asked for was the line that got cut.
-  var k = prompt('Pl@ntNet API key (my.plantnet.org → Settings → API)', pnKey());
+  var k = prompt(
+    'Pl@ntNet API key — from my.plantnet.org → Settings → API.\n\n' +
+    'Stored on this device only. Leave blank to clear it.', pnKey());
   if (k === null) return false;                 // cancelled
   pnSetKey(k.trim());
   return !!k.trim();
