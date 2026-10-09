@@ -141,6 +141,7 @@ all follow — nothing else needs editing.
 | | |
 |---|---|
 | `type` | `text`, `select`, `number`, `textarea` |
+| | `number` fields store a **number**, not a string, and blank stays `null` — not measured is not zero |
 | `auto` | fn returning the value to prefill on a new point |
 | `ro` | shown but not editable; its value comes from `fill()` |
 | `fill` | `fn(ctx)` run on save; ctx is `{lon, lat, acc, alt, src, date, photos}` |
@@ -223,6 +224,19 @@ because a canvas re-encode drops EXIF. And it **strips the camera's GPS tag**:
 the point already carries a position that was recorded deliberately, and a
 second, silent one buried in file metadata is a privacy leak waiting to be
 shared.
+
+### Tree measurements
+
+`dbh_in` and `height_ft` are numeric fields with a decimal keypad on the phone.
+They reject anything non-numeric or negative, store as **numbers** rather than
+strings — a measurement exported as `"12.5"` cannot be summed, sorted or
+classified without every consumer coercing it first — and stay `null` when
+blank, because *not measured* is not zero.
+
+**The units are in the field names on purpose.** A column called `dbh` is
+ambiguous the moment the file leaves the phone. Inches and feet are the US
+forestry convention and match the imperial scale bar; for metric, change these
+two lines to `dbh_cm` and `height_m` and relabel them — nothing else reads them.
 
 ### Identifying a tree with Pl@ntNet
 

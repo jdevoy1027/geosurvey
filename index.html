@@ -765,6 +765,12 @@ var FIELDS = [
   // afterwards -- the model proposes, the surveyor decides.
   { key: 'species', label: 'Species', type: 'text' },
   { key: 'common_name', label: 'Common name', type: 'text' },
+  // Units are in the field name, not left to a convention someone has to
+  // remember. A column called "dbh" is ambiguous the moment the file leaves
+  // this phone; dbh_in is not. Switch to dbh_cm / height_m by editing these two
+  // lines -- nothing else reads them.
+  { key: 'dbh_in', label: 'DBH (inches)', type: 'number' },
+  { key: 'height_ft', label: 'Height (feet)', type: 'number' },
   { key: 'description', label: 'Description', type: 'textarea' },
   // Provenance for the determination. Kept beside the name because "Quercus
   // agrifolia" at 0.92 from a bark photo and the same name typed by hand are
@@ -1323,9 +1329,15 @@ function openSheet(feature, fix) {
         }).join('') + '</select>';
     } else if (f.type === 'textarea') {
       html += '<textarea id="f-' + f.key + '" rows="3">' + esc(v) + '</textarea>';
+    } else if (f.type === 'number') {
+      // inputmode as well as type: on iOS type=number alone gives a keypad with
+      // no decimal point on some layouts, and a DBH of 12.5 has to be typeable.
+      // step=any stops the browser rejecting decimals against an implied step
+      // of 1.
+      html += '<input id="f-' + f.key + '" type="number" inputmode="decimal" ' +
+              'step="any" min="0" value="' + esc(v) + '">';
     } else {
-      html += '<input id="f-' + f.key + '" type="' + (f.type === 'number' ? 'number' : 'text') +
-              '" value="' + esc(v) + '"' +
+      html += '<input id="f-' + f.key + '" type="text" value="' + esc(v) + '"' +
               // Station codes are case-sensitive and not words, so the phone
               // must not autocorrect or capitalise them.
               ' autocapitalize="none" autocorrect="off" spellcheck="false">';
@@ -1378,6 +1390,20 @@ function saveSheet() {
       alert(f.label + ' is required.');
       if (el) el.focus();
       return;
+    }
+    if (f.type === 'number') {
+      // Stored as a number, not a string: a measurement that exports as "12.5"
+      // cannot be summed, sorted or classified without every consumer having
+      // to coerce it first. Blank stays null -- not measured is not zero.
+      if (v === '') { vals[f.key] = null; continue; }
+      var num = Number(v);
+      if (!isFinite(num) || num < 0) {
+        alert(f.label + ' must be a number, and cannot be negative.');
+        if (el) el.focus();
+        return;
+      }
+      vals[f.key] = num;
+      continue;
     }
     vals[f.key] = v;
   }
