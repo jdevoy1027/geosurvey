@@ -215,10 +215,20 @@ and becomes a filename list on export.
 
 ### Photos
 
-**+ Photo** opens iOS's own sheet — Photo Library, Take Photo, Choose File.
-Deliberately NOT `capture="environment"`: that suppresses the picker and forces
-a direct camera UI, which came up black with no shutter on an iPhone and is a
-known failure in a Home Screen launch. Tap a thumbnail to view it full screen,
+**Camera** opens an in-app camera — a live preview this page owns, with a
+shutter — and **Library** opens the photo picker.
+
+They are two buttons because one was not enough. The original relied on the
+file input to offer both, and on an iPhone the camera half of that came up
+**black with no shutter**. Removing `capture="environment"` did not fix it,
+which ruled out the attribute and left the other known iOS failure: a
+file-input camera in a Home Screen (standalone) launch, which this app invites
+by setting `apple-mobile-web-app-capable`.
+
+`getUserMedia` avoids that path entirely. It also fails loudly: where the file
+input just showed black, a refused permission, a missing camera or one held by
+another app each arrive as a named error the overlay reports, with what to do
+about it. Tap a thumbnail to view it full screen,
 or delete it from there.
 
 Each photo is resized to **1600 px on the long edge** at JPEG 0.82 before it is

@@ -289,6 +289,30 @@
     padding: 9px 16px 2px; font-size: 11.5px; line-height: 1.5; color: var(--ink-soft);
   }
 
+  /* ── in-app camera ────────────────────────────────────────────────────── */
+  .cam { position: fixed; inset: 0; z-index: 30; background: #000; display: none; flex-direction: column; }
+  .cam.on { display: flex; }
+  .cam video { flex: 1; min-height: 0; width: 100%; object-fit: cover; background: #000; }
+  .cam .cacts {
+    display: flex; align-items: center; gap: 14px;
+    padding: 14px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+    background: #000;
+  }
+  .cam .cacts .sp { flex: 1; }
+  .cam .cacts button {
+    font: inherit; font-size: 14.5px; font-weight: 560; min-height: 46px; padding: 0 16px;
+    border-radius: 10px; border: 1px solid #3a3a36; background: #1b1b19; color: #f2f2ee;
+    cursor: pointer; touch-action: manipulation;
+  }
+  .cam .shut {
+    width: 68px; height: 68px; min-height: 68px; padding: 0; border-radius: 50%;
+    background: #fff; border: 4px solid #cfcfc8;
+  }
+  .cam .msg {
+    position: absolute; left: 16px; right: 16px; top: 50%; transform: translateY(-50%);
+    color: #f2f2ee; font-size: 13.5px; line-height: 1.5; text-align: center;
+  }
+
   /* Full-screen viewer. Dark, because a photo of an outcrop is being judged
      here and a white surround skews how it reads. */
   .viewer {
@@ -375,6 +399,18 @@
     <span class="sp"></span>
     <button id="btn-list" type="button">List</button>
     <button id="btn-export" type="button">Export</button>
+  </div>
+</div>
+
+<div class="cam" id="cam">
+  <video id="cam-video" playsinline autoplay muted></video>
+  <div class="msg" id="cam-msg" hidden></div>
+  <div class="cacts">
+    <button type="button" id="cam-cancel">Cancel</button>
+    <span class="sp"></span>
+    <button type="button" class="shut" id="cam-shut" aria-label="Take photo"></button>
+    <span class="sp"></span>
+    <button type="button" id="cam-flip">Flip</button>
   </div>
 </div>
 
@@ -1004,37 +1040,137 @@ function renderShots() {
       var u = URL.createObjectURL(b); shotUrls.push(u); img.src = u;
     });
   });
+  // Camera and Library are separate buttons. They were one, relying on iOS to
+  // offer the choice, and the camera half of that never worked on the phone.
+  var camBtn = document.createElement('button');
+  camBtn.type = 'button';
+  camBtn.className = 'addshot';
+  camBtn.innerHTML = '<span>Camera</span>';
+  camBtn.addEventListener('click', openCam);
+  host.appendChild(camBtn);
+
+  // No capture attribute: it suppresses iOS's picker, and the library is the
+  // whole point of this one.
   var lab = document.createElement('label');
   lab.className = 'addshot';
-  lab.innerHTML = '<span>+ Photo</span>' +
-    // No capture attribute, deliberately. capture="environment" does not merely
-    // prefer the rear camera -- it suppresses the picker and forces iOS into a
-    // direct camera UI, which on this device came up black with no shutter,
-    // and in a Home Screen (standalone) launch it is a known iOS failure.
-    // Without it, iOS shows its own sheet -- Photo Library / Take Photo /
-    // Choose File -- which uses the normal camera and also allows a shot taken
-    // earlier, which is often the one being filed anyway.
-    '<input type="file" accept="image/*">';
+  lab.innerHTML = '<span>Library</span><input type="file" accept="image/*">';
   var inp = lab.querySelector('input');
   inp.addEventListener('change', function () {
     var f = inp.files && inp.files[0];
     inp.value = '';
-    if (!f) return;
-    lab.className = 'addshot busy';
-    lab.querySelector('span').textContent = '…';
-    shrink(f).then(function (blob) {
-      var id = 'p' + Date.now() + '-' + Math.round(performance.now() * 1000 % 1e6);
-      return shotPut(id, blob).then(function () {
-        sheetShots.push(id); shotsAdded.push(id); renderShots();
-      });
-    }).catch(function (e) {
-      lab.className = 'addshot';
-      lab.querySelector('span').textContent = '+ Photo';
-      alert('Could not add that photo.\n\n' + (e && e.message ? e.message : ''));
-    });
+    if (f) addShot(f);
   });
   host.appendChild(lab);
 }
+
+/* One path for both sources: shrink, store, show. An in-app frame and a library
+   file are stored identically, so nothing downstream has to know which it was. */
+function addShot(fileOrBlob) {
+  var host = document.getElementById('shots');
+  var busy = host && host.querySelector('.addshot');
+  if (busy) { busy.className = 'addshot busy'; busy.querySelector('span').textContent = '…'; }
+  return shrink(fileOrBlob).then(function (blob) {
+    var id = 'p' + Date.now() + '-' + Math.round(performance.now() * 1000 % 1e6);
+    return shotPut(id, blob).then(function () {
+      sheetShots.push(id); shotsAdded.push(id); renderShots();
+    });
+  }).catch(function (e) {
+    renderShots();
+    alert('Could not add that photo.\n\n' + (e && e.message ? e.message : ''));
+  });
+}
+
+/* ── in-app camera ───────────────────────────────────────────────────────
+   The file input's camera came up black on the phone. Removing
+   capture="environment" did not fix it, which rules out the attribute and
+   points at the other known iOS failure: a file-input camera in a Home Screen
+   (standalone) launch, which this app invites by setting
+   apple-mobile-web-app-capable.
+
+   getUserMedia does not go through that path at all -- the preview is a video
+   element this page owns, and a frame is drawn off it into a canvas. It also
+   fails loudly: where the file input just showed black, a refused permission
+   or a camera held by another app arrives here as a named error that can be
+   reported. The library route is kept as a separate button, since that part
+   was never broken.
+   ========================================================================= */
+var CAM = document.getElementById('cam');
+var camStream = null, camFacing = 'environment';
+
+function camStop() {
+  if (camStream) {
+    // Every track, explicitly. A live track keeps the camera and its indicator
+    // on after the overlay is gone.
+    camStream.getTracks().forEach(function (t) { t.stop(); });
+    camStream = null;
+  }
+  var v = document.getElementById('cam-video');
+  v.pause(); v.srcObject = null;
+}
+function closeCam() { camStop(); CAM.className = 'cam'; }
+
+function camMsg(t) {
+  var el = document.getElementById('cam-msg');
+  if (!t) { el.hidden = true; el.textContent = ''; return; }
+  el.hidden = false; el.innerHTML = t;
+}
+
+function openCam() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    alert('This browser cannot open the camera directly.\n\nUse Library instead.');
+    return;
+  }
+  CAM.className = 'cam on';
+  camMsg('Starting the camera…');
+  camStop();
+  navigator.mediaDevices.getUserMedia({
+    // ideal, not exact: a device with only one camera must still work rather
+    // than failing with OverconstrainedError.
+    video: { facingMode: { ideal: camFacing },
+             width: { ideal: 1920 }, height: { ideal: 1440 } },
+    audio: false
+  }).then(function (s) {
+    camStream = s;
+    var v = document.getElementById('cam-video');
+    v.srcObject = s;
+    // iOS will not autoplay without an explicit play(), and without playsinline
+    // it takes the video fullscreen instead of showing it in place.
+    return v.play().then(function () { camMsg(''); });
+  }).catch(function (e) {
+    var n = (e && e.name) || '';
+    var why =
+      n === 'NotAllowedError' ? 'Camera access is blocked for this site.<br><br>' +
+        'Settings → Safari → Camera → Allow, or tap “aA” in the address bar → ' +
+        'Website Settings → Camera.' :
+      n === 'NotFoundError' ? 'No camera was found on this device.' :
+      n === 'NotReadableError' ? 'The camera is in use by another app.<br><br>' +
+        'Close the Camera app and try again.' :
+      n === 'OverconstrainedError' ? 'That camera is unavailable. Try Flip.' :
+      'The camera could not start.<br><br>' + esc(n || (e && e.message) || '');
+    camMsg(why + '<br><br>You can still use <b>Library</b>.');
+  });
+}
+
+document.getElementById('cam-cancel').addEventListener('click', closeCam);
+document.getElementById('cam-flip').addEventListener('click', function () {
+  camFacing = (camFacing === 'environment') ? 'user' : 'environment';
+  openCam();
+});
+
+document.getElementById('cam-shut').addEventListener('click', function () {
+  var v = document.getElementById('cam-video');
+  if (!camStream || !v.videoWidth) return;
+  var c = document.createElement('canvas');
+  // The sensor's own frame size, downscaled by the same shrink() every photo
+  // goes through, so an in-app shot and a library one are stored identically.
+  c.width = v.videoWidth; c.height = v.videoHeight;
+  c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+  closeCam();
+  c.toBlob(function (b) {
+    if (!b) { alert('Could not capture the frame.'); return; }
+    addShot(b);
+  }, 'image/jpeg', 0.92);
+});
 
 /* ── the viewer ──────────────────────────────────────────────────────────── */
 var VIEWER = document.getElementById('viewer');
