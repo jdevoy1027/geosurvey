@@ -209,8 +209,10 @@ and becomes a filename list on export.
 
 ### Photos
 
-**+ Photo** on the form opens the rear camera (the library too — a shot taken
-earlier is often the one being filed). Tap a thumbnail to view it full screen,
+**+ Photo** opens iOS's own sheet — Photo Library, Take Photo, Choose File.
+Deliberately NOT `capture="environment"`: that suppresses the picker and forces
+a direct camera UI, which came up black with no shutter on an iPhone and is a
+known failure in a Home Screen launch. Tap a thumbnail to view it full screen,
 or delete it from there.
 
 Each photo is resized to **1600 px on the long edge** at JPEG 0.82 before it is

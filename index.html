@@ -244,7 +244,14 @@
     font-size: 11px; font-weight: 600; text-align: center; line-height: 1.25;
     touch-action: manipulation;
   }
-  .addshot input { display: none; }
+  /* Hidden by being 1px and transparent rather than display:none. A
+     display:none file input is ignored by some iOS versions when its label is
+     tapped, so the picker never opens at all -- a different failure from the
+     one above, and one worth not inviting. */
+  .addshot input {
+    position: absolute; width: 1px; height: 1px; opacity: 0;
+    pointer-events: none; overflow: hidden;
+  }
   .addshot.busy { color: var(--accent); border-color: var(--accent); }
 
   /* ── identification ───────────────────────────────────────────────────── */
@@ -1000,10 +1007,14 @@ function renderShots() {
   var lab = document.createElement('label');
   lab.className = 'addshot';
   lab.innerHTML = '<span>+ Photo</span>' +
-    // capture="environment" asks for the rear camera directly. iOS still
-    // offers the library as well, which is wanted -- a shot taken earlier is
-    // often the one being filed.
-    '<input type="file" accept="image/*" capture="environment">';
+    // No capture attribute, deliberately. capture="environment" does not merely
+    // prefer the rear camera -- it suppresses the picker and forces iOS into a
+    // direct camera UI, which on this device came up black with no shutter,
+    // and in a Home Screen (standalone) launch it is a known iOS failure.
+    // Without it, iOS shows its own sheet -- Photo Library / Take Photo /
+    // Choose File -- which uses the normal camera and also allows a shot taken
+    // earlier, which is often the one being filed anyway.
+    '<input type="file" accept="image/*">';
   var inp = lab.querySelector('input');
   inp.addEventListener('change', function () {
     var f = inp.files && inp.files[0];
