@@ -175,26 +175,64 @@ better, red at 30 m or worse.
 altitude in metres, `src` either `gps` or `placed`. Coordinates are rounded to
 six decimals — about 0.1 m, far finer than any phone fix.
 
+### Photos
+
+**+ Photo** on the form opens the rear camera (the library too — a shot taken
+earlier is often the one being filed). Tap a thumbnail to view it full screen,
+or delete it from there.
+
+Each photo is resized to **1600 px on the long edge** at JPEG 0.82 before it is
+stored. A phone photo is 3–4 MB and about 4000 px across; nothing here needs
+that, and a day of them at full size would not fit. Measured: a 3000×2000 test
+image went in at 192 KB and came out 1600×1067 at 24 KB, aspect preserved.
+
+Two consequences of the re-encode worth knowing. It applies the EXIF rotation
+first — without that, a photo shot in portrait would be stored on its side,
+because a canvas re-encode drops EXIF. And it **strips the camera's GPS tag**:
+the point already carries a position that was recorded deliberately, and a
+second, silent one buried in file metadata is a privacy leak waiting to be
+shared.
+
 ### Storage
 
-Everything is held in `localStorage` as one GeoJSON FeatureCollection, which is
-also exactly what Export writes, so exporting is a serialise rather than a
-conversion and there is no second representation to drift.
+Points live in `localStorage` as one GeoJSON FeatureCollection. **Photos live in
+IndexedDB**, referenced by id, because `localStorage` holds strings and gets
+about 5 MB — one photo would eat it. Separate budgets mean a photo can never
+push the notes out.
+
+The app asks for persistent storage on load, so Safari is less likely to evict a
+survey between outings. It may refuse; nothing depends on it being granted.
+
+**List** shows what the survey is costing — photo count, megabytes used and the
+quota — because on a phone storage is the binding constraint and it is invisible
+until it runs out.
+
+The FeatureCollection is exactly what Export writes, so exporting is a serialise
+rather than a conversion and there is no second representation to drift.
 
 **It survives a reload and a force-quit. It does not survive clearing site
 data**, and Safari can evict storage from a site you have not opened in a while.
 **Export at the end of each day.** A quota failure is reported rather than
 swallowed, but the honest protection is getting the data off the phone.
 
-Export prefers the iOS share sheet when the browser supports sharing files —
-Mail, AirDrop, iCloud directly — and falls back to a download otherwise, since a
+### Export
+
+One share: the GeoJSON **and every photo** as separate files. Photos are renamed
+on the way out — `S001-1.jpg`, `S001-2.jpg`, beside the `S001` record, with
+`properties.photos` listing those names. The internal ids stay inside the app,
+where a station can be renamed at any time and a filename derived from it would
+go stale.
+
+It prefers the iOS share sheet — Mail, AirDrop, iCloud directly — because a
 download on iOS lands in Files and is then awkward to move anywhere useful.
+`canShare` is asked with the real file list rather than a token one, since the
+limit is on the whole payload: a survey with forty photos can be refused where
+one file would pass. If it is refused, the GeoJSON downloads and you are asked
+before the photos follow one at a time, rather than a dozen silent downloads
+firing off.
 
 ## Not built yet
 
-- **Photos.** `<input type="file" accept="image/*" capture="environment">` opens
-  the camera, but images cannot go in `localStorage` — that means IndexedDB and
-  a real storage budget.
 - **Offline.** Worth deciding before this gets used in anger. NAIP is rendered
   on demand and cannot work without a connection, so offline means pre-caching
   tiles for a known survey area before leaving, plus a service worker for the

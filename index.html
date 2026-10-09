@@ -227,8 +227,50 @@
   .acts .save { flex: 1; background: var(--accent); border-color: var(--accent); color: #fff; }
   .acts .del { color: var(--warn); border-color: #e8cdc7; }
 
+  /* ── photos ───────────────────────────────────────────────────────────── */
+  .shots { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 6px; }
+  .shots .th {
+    width: 72px; height: 72px; border-radius: 9px; border: 1px solid var(--line);
+    object-fit: cover; background: #f1f1ec; cursor: pointer; display: block;
+  }
+  .addshot {
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+    width: 72px; height: 72px; border: 1px dashed #c4c4bd; border-radius: 9px;
+    background: #fafaf7; color: var(--ink-soft); cursor: pointer;
+    font-size: 11px; font-weight: 600; text-align: center; line-height: 1.25;
+    touch-action: manipulation;
+  }
+  .addshot input { display: none; }
+  .addshot.busy { color: var(--accent); border-color: var(--accent); }
+
+  /* Full-screen viewer. Dark, because a photo of an outcrop is being judged
+     here and a white surround skews how it reads. */
+  .viewer {
+    position: fixed; inset: 0; z-index: 20; background: #121210;
+    display: none; flex-direction: column;
+  }
+  .viewer.on { display: flex; }
+  .viewer img {
+    flex: 1; min-height: 0; width: 100%; object-fit: contain;
+    padding: calc(env(safe-area-inset-top, 0px) + 8px) 8px 8px;
+  }
+  .viewer .vacts {
+    display: flex; gap: 8px; padding: 10px 12px calc(10px + env(safe-area-inset-bottom, 0px));
+  }
+  .viewer .vacts button {
+    font: inherit; font-size: 14px; font-weight: 560; min-height: 46px; padding: 0 16px;
+    border-radius: 10px; border: 1px solid #3a3a36; background: #22221f; color: #f2f2ee;
+    cursor: pointer; touch-action: manipulation;
+  }
+  .viewer .vacts .sp { flex: 1; }
+  .viewer .vacts .del { color: #ff9b86; border-color: #4a2b24; }
+
   /* The saved-point list */
   .plist { padding: 4px 0 10px; }
+  .use {
+    padding: 10px 16px 2px; font-size: 11.5px; color: var(--ink-soft);
+    font-variant-numeric: tabular-nums;
+  }
   .prow {
     display: flex; gap: 10px; align-items: baseline; width: 100%; text-align: left;
     padding: 11px 16px; border: 0; border-bottom: 1px solid #f1f1ec;
@@ -286,6 +328,15 @@
     <span class="sp"></span>
     <button id="btn-list" type="button">List</button>
     <button id="btn-export" type="button">Export</button>
+  </div>
+</div>
+
+<div class="viewer" id="viewer">
+  <img id="viewer-img" alt="">
+  <div class="vacts">
+    <button type="button" id="viewer-close">Close</button>
+    <span class="sp"></span>
+    <button type="button" class="del" id="viewer-del">Delete photo</button>
   </div>
 </div>
 
@@ -721,6 +772,182 @@ function refreshPts() {
   document.getElementById('tally').className = 'tally' + (n ? ' on' : '');
 }
 
+/* ── photos ──────────────────────────────────────────────────────────────
+   In IndexedDB, not localStorage. localStorage holds strings and gets about
+   5 MB; one phone photo is several megabytes before it is even base64'd. The
+   points stay in localStorage and reference photos by id, so the record and
+   the image have separate budgets and a photo can never push the notes out.
+   ======================================================================== */
+var SHOT_DB = 'geosurvey-photos', SHOT_TBL = 'shots';
+var dbp = null;
+function db() {
+  if (dbp) return dbp;
+  dbp = new Promise(function (res, rej) {
+    var r = indexedDB.open(SHOT_DB, 1);
+    r.onupgradeneeded = function () { r.result.createObjectStore(SHOT_TBL); };
+    r.onsuccess = function () { res(r.result); };
+    r.onerror = function () { rej(r.error); };
+  });
+  return dbp;
+}
+function dbOp(mode, fn) {
+  return db().then(function (d) {
+    return new Promise(function (res, rej) {
+      var tx = d.transaction(SHOT_TBL, mode), rq = fn(tx.objectStore(SHOT_TBL));
+      tx.oncomplete = function () { res(rq ? rq.result : undefined); };
+      tx.onerror = function () { rej(tx.error); };
+      tx.onabort = function () { rej(tx.error); };
+    });
+  });
+}
+function shotPut(id, b) { return dbOp('readwrite', function (s) { return s.put(b, id); }); }
+function shotGet(id) { return dbOp('readonly', function (s) { return s.get(id); }); }
+function shotDel(id) { return dbOp('readwrite', function (s) { return s.delete(id); }); }
+
+// Ask the browser not to evict this. Safari clears storage for sites left
+// unvisited, which for a field app means a day's photos disappearing between
+// surveys. It may refuse; nothing here depends on it being granted.
+if (navigator.storage && navigator.storage.persist) navigator.storage.persist();
+
+var SHOT_MAX = 1600;     // long edge, px
+var SHOT_Q = 0.82;
+
+/* A phone photo is 3-4 MB and about 4000 px across. Nothing here needs that:
+   1600 px is more than any screen shows and keeps a day of photos inside a
+   sane storage budget. The re-encode also strips EXIF, which removes the GPS
+   tag the camera writes -- the point already carries a position that is
+   recorded deliberately, and a second, silent one in the file metadata is a
+   privacy leak waiting to be shared. */
+function shrink(file) {
+  var viaBitmap = function () {
+    // createImageBitmap applies the EXIF orientation; a canvas re-encode drops
+    // EXIF, so without this a photo shot in portrait comes back on its side.
+    return createImageBitmap(file, { imageOrientation: 'from-image' });
+  };
+  var viaImg = function () {
+    // Safari before 16.4 has no imageOrientation option. An <img> is decoded
+    // with the orientation already applied, so drawing that is equivalent.
+    return new Promise(function (res, rej) {
+      var u = URL.createObjectURL(file), im = new Image();
+      im.onload = function () { URL.revokeObjectURL(u); res(im); };
+      im.onerror = function () { URL.revokeObjectURL(u); rej(new Error('could not decode')); };
+      im.src = u;
+    });
+  };
+  var p;
+  try { p = (typeof createImageBitmap === 'function') ? viaBitmap() : viaImg(); }
+  catch (e) { p = viaImg(); }
+
+  return p.catch(viaImg).then(function (src) {
+    var iw = src.width || src.naturalWidth, ih = src.height || src.naturalHeight;
+    var s = Math.min(1, SHOT_MAX / Math.max(iw, ih));
+    var w = Math.max(1, Math.round(iw * s)), h = Math.max(1, Math.round(ih * s));
+    var c = document.createElement('canvas'); c.width = w; c.height = h;
+    c.getContext('2d').drawImage(src, 0, 0, w, h);
+    if (src.close) src.close();
+    return new Promise(function (res, rej) {
+      c.toBlob(function (b) { b ? res(b) : rej(new Error('could not encode')); }, 'image/jpeg', SHOT_Q);
+    });
+  });
+}
+
+/* Form-session state. A photo is written to IndexedDB the moment it is taken --
+   holding several multi-megabyte blobs in memory to write later is how a phone
+   browser gets killed mid-form -- so the two lists below are what makes Cancel
+   and Save honest:
+
+     shotsAdded    written this session; removed again if the form is cancelled
+     shotsRemoved  dropped from the form; deleted only once Save commits
+
+   Deleting the blob at the moment the user taps Delete would leave the saved
+   record pointing at nothing if they then cancelled. */
+var sheetShots = [], shotsAdded = [], shotsRemoved = [], shotUrls = [];
+
+function freeShotUrls() {
+  shotUrls.forEach(function (u) { URL.revokeObjectURL(u); });
+  shotUrls = [];
+}
+
+function renderShots() {
+  var host = document.getElementById('shots');
+  if (!host) return;
+  freeShotUrls();
+  host.innerHTML = '';
+  sheetShots.forEach(function (id) {
+    var img = document.createElement('img');
+    img.className = 'th'; img.alt = 'Photo';
+    img.addEventListener('click', function () { openViewer(id); });
+    host.appendChild(img);
+    shotGet(id).then(function (b) {
+      if (!b) return;
+      var u = URL.createObjectURL(b); shotUrls.push(u); img.src = u;
+    });
+  });
+  var lab = document.createElement('label');
+  lab.className = 'addshot';
+  lab.innerHTML = '<span>+ Photo</span>' +
+    // capture="environment" asks for the rear camera directly. iOS still
+    // offers the library as well, which is wanted -- a shot taken earlier is
+    // often the one being filed.
+    '<input type="file" accept="image/*" capture="environment">';
+  var inp = lab.querySelector('input');
+  inp.addEventListener('change', function () {
+    var f = inp.files && inp.files[0];
+    inp.value = '';
+    if (!f) return;
+    lab.className = 'addshot busy';
+    lab.querySelector('span').textContent = '…';
+    shrink(f).then(function (blob) {
+      var id = 'p' + Date.now() + '-' + Math.round(performance.now() * 1000 % 1e6);
+      return shotPut(id, blob).then(function () {
+        sheetShots.push(id); shotsAdded.push(id); renderShots();
+      });
+    }).catch(function (e) {
+      lab.className = 'addshot';
+      lab.querySelector('span').textContent = '+ Photo';
+      alert('Could not add that photo.\n\n' + (e && e.message ? e.message : ''));
+    });
+  });
+  host.appendChild(lab);
+}
+
+/* ── the viewer ──────────────────────────────────────────────────────────── */
+var VIEWER = document.getElementById('viewer');
+var viewing = null, viewUrl = null;
+
+function openViewer(id) {
+  viewing = id;
+  shotGet(id).then(function (b) {
+    if (!b) return;
+    if (viewUrl) URL.revokeObjectURL(viewUrl);
+    viewUrl = URL.createObjectURL(b);
+    document.getElementById('viewer-img').src = viewUrl;
+    VIEWER.className = 'viewer on';
+  });
+}
+function closeViewer() {
+  VIEWER.className = 'viewer';
+  document.getElementById('viewer-img').removeAttribute('src');
+  if (viewUrl) { URL.revokeObjectURL(viewUrl); viewUrl = null; }
+  viewing = null;
+}
+document.getElementById('viewer-close').addEventListener('click', closeViewer);
+document.getElementById('viewer-del').addEventListener('click', function () {
+  if (!viewing) return;
+  var id = viewing;
+  closeViewer();
+  sheetShots = sheetShots.filter(function (x) { return x !== id; });
+  // Added this session and now dropped: nothing was ever committed, so the
+  // blob can go immediately. Otherwise it waits for Save.
+  if (shotsAdded.indexOf(id) >= 0) {
+    shotsAdded = shotsAdded.filter(function (x) { return x !== id; });
+    shotDel(id);
+  } else {
+    shotsRemoved.push(id);
+  }
+  renderShots();
+});
+
 /* ── the sheet ───────────────────────────────────────────────────────────── */
 var SHEET = document.getElementById('sheet');
 var SCRIM = document.getElementById('scrim');
@@ -728,8 +955,14 @@ var editing = null;          // the feature being edited, or null for a new one
 var pendingFix = null;       // position captured when the form opened
 
 function closeSheet() {
+  // Cancelling must leave no orphans: anything photographed during this form
+  // and not saved is removed from storage here. Anything the user deleted from
+  // an existing point is put back, because the record still references it.
+  shotsAdded.forEach(function (id) { shotDel(id); });
+  shotsAdded = []; shotsRemoved = [];
+  freeShotUrls();
   SHEET.className = 'sheet'; SCRIM.className = 'scrim';
-  editing = null; pendingFix = null;
+  editing = null; pendingFix = null; sheetShots = [];
 }
 SCRIM.addEventListener('click', closeSheet);
 document.getElementById('sheet-x').addEventListener('click', closeSheet);
@@ -783,7 +1016,13 @@ function openSheet(feature, fix) {
     }
     html += '</div>';
   });
+  html += '<div class="fld"><label>Photos</label><div class="shots" id="shots"></div></div>';
   document.getElementById('sheet-body').innerHTML = html;
+  document.getElementById('sheet-body').onclick = null;   // not the list view
+
+  sheetShots = (feature && Array.isArray(p.photos)) ? p.photos.slice() : [];
+  shotsAdded = []; shotsRemoved = [];
+  renderShots();
 
   document.getElementById('sheet-acts').innerHTML =
     (feature ? '<button type="button" class="del" id="a-del">Delete</button>' : '') +
@@ -810,12 +1049,19 @@ function saveSheet() {
     vals[f.key] = v;
   }
 
+  // Save commits the photo changes: blobs dropped from the form go now, and
+  // the ones added stop being provisional.
+  shotsRemoved.forEach(function (id) { shotDel(id); });
+  shotsRemoved = []; shotsAdded = [];
+
   if (editing) {
     FIELDS.forEach(function (f) { editing.properties[f.key] = vals[f.key]; });
+    editing.properties.photos = sheetShots.slice();
     editing.properties.edited = new Date().toISOString();
   } else {
     var props = { src: pendingFix.src, at: new Date().toISOString() };
     FIELDS.forEach(function (f) { props[f.key] = vals[f.key]; });
+    props.photos = sheetShots.slice();
     // Measured values live beside the typed ones, not inside the form.
     props.acc = pendingFix.acc;
     props.alt = pendingFix.alt == null ? null : Math.round(pendingFix.alt * 10) / 10;
@@ -831,7 +1077,14 @@ function saveSheet() {
 
 function deleteSheet() {
   if (!editing) return;
-  if (!confirm('Delete point ' + (editing.properties.station || '') + '?')) return;
+  var shots = Array.isArray(editing.properties.photos) ? editing.properties.photos : [];
+  if (!confirm('Delete point ' + (editing.properties.station || '') +
+               (shots.length ? ' and its ' + shots.length + ' photo' + (shots.length === 1 ? '' : 's') : '') +
+               '?')) return;
+  // The photos go with it. Leaving them would be storage nothing can reach,
+  // on a device where storage is the binding constraint.
+  shots.concat(shotsAdded).forEach(function (id) { shotDel(id); });
+  shotsAdded = []; shotsRemoved = [];
   PTS.features = PTS.features.filter(function (f) { return f !== editing; });
   savePts(); refreshPts(); closeSheet();
 }
@@ -885,13 +1138,30 @@ document.getElementById('btn-list').addEventListener('click', function () {
   document.getElementById('sheet-body').innerHTML = '<div class="plist">' +
     rows.map(function (f) {
       var p = f.properties;
+      var n = Array.isArray(p.photos) ? p.photos.length : 0;
       return '<button class="prow" type="button" data-st="' + esc(p.station) +
              '" data-at="' + esc(p.at) + '">' +
              '<b>' + esc(p.station || '—') + '</b>' +
-             '<span class="t">' + esc(p.type || '') + '</span>' +
+             '<span class="t">' + esc(p.type || '') +
+             (n ? ' · ' + n + ' photo' + (n === 1 ? '' : 's') : '') + '</span>' +
              '<span class="w">' + (p.acc == null ? 'placed' : '±' + Math.round(p.acc) + ' m') +
              '</span></button>';
-    }).join('') + '</div>';
+    }).join('') + '</div><div class="use" id="use"></div>';
+
+  // What the survey is costing on the device. The binding constraint here is
+  // storage, not anything else, and it is invisible until it runs out.
+  var nShots = PTS.features.reduce(function (a, f) {
+    return a + (Array.isArray(f.properties.photos) ? f.properties.photos.length : 0);
+  }, 0);
+  var useEl = document.getElementById('use');
+  useEl.textContent = nShots + ' photo' + (nShots === 1 ? '' : 's') + ' stored';
+  if (navigator.storage && navigator.storage.estimate) {
+    navigator.storage.estimate().then(function (e) {
+      if (!e || !e.usage) return;
+      useEl.textContent += ' · ' + (e.usage / 1048576).toFixed(1) + ' MB used' +
+        (e.quota ? ' of about ' + Math.round(e.quota / 1048576) + ' MB available' : '');
+    });
+  }
   document.getElementById('sheet-acts').innerHTML =
     '<button type="button" class="save" id="a-close">Done</button>';
   document.getElementById('a-close').addEventListener('click', closeSheet);
@@ -911,24 +1181,77 @@ document.getElementById('btn-list').addEventListener('click', function () {
   SHEET.className = 'sheet on'; SCRIM.className = 'scrim on';
 });
 
-document.getElementById('btn-export').addEventListener('click', function () {
-  if (!PTS.features.length) return;
-  var name = 'geosurvey-' + new Date().toISOString().slice(0, 10) + '.geojson';
-  var text = JSON.stringify(PTS, null, 2);
-  var file = new File([text], name, { type: 'application/geo+json' });
-
-  // Share first on a phone: a download lands in Files and is then hard to get
-  // anywhere useful, where the share sheet reaches Mail, AirDrop and iCloud
-  // directly. Falls back to a download where sharing a file is unsupported.
-  if (navigator.canShare && navigator.canShare({ files: [file] })) {
-    navigator.share({ files: [file], title: name }).catch(function () { /* cancelled */ });
-    return;
-  }
-  var url = URL.createObjectURL(new Blob([text], { type: 'application/geo+json' }));
+function download(blob, name) {
+  var url = URL.createObjectURL(blob);
   var a = document.createElement('a');
   a.href = url; a.download = name;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   setTimeout(function () { URL.revokeObjectURL(url); }, 4000);
+}
+
+document.getElementById('btn-export').addEventListener('click', function () {
+  if (!PTS.features.length) return;
+  var btn = this;
+  btn.disabled = true; btn.textContent = 'Preparing…';
+
+  var day = new Date().toISOString().slice(0, 10);
+  var gjName = 'geosurvey-' + day + '.geojson';
+
+  /* The exported copy renames photos from their internal ids to something a
+     person can match up -- S001-1.jpg beside the S001 record. The ids stay
+     opaque inside the app, where a station can be renamed at any time and a
+     filename derived from it would go stale. */
+  var out = { type: 'FeatureCollection', features: [] };
+  var wanted = [];
+  PTS.features.forEach(function (f) {
+    var p = {}, i;
+    for (i in f.properties) if (f.properties.hasOwnProperty(i)) p[i] = f.properties[i];
+    var ids = Array.isArray(p.photos) ? p.photos : [];
+    var st = String(p.station || 'point').replace(/[^A-Za-z0-9_-]/g, '_');
+    p.photos = ids.map(function (id, n) {
+      var nm = st + '-' + (n + 1) + '.jpg';
+      wanted.push({ id: id, name: nm });
+      return nm;
+    });
+    out.features.push({ type: 'Feature', properties: p, geometry: f.geometry });
+  });
+
+  var text = JSON.stringify(out, null, 2);
+
+  Promise.all(wanted.map(function (w) {
+    return shotGet(w.id).then(function (b) {
+      return b ? new File([b], w.name, { type: 'image/jpeg' }) : null;
+    }).catch(function () { return null; });
+  })).then(function (shots) {
+    var files = [new File([text], gjName, { type: 'application/geo+json' })]
+      .concat(shots.filter(Boolean));
+
+    btn.disabled = false; btn.textContent = 'Export';
+
+    // One share with the GeoJSON and every photo. canShare is asked with the
+    // real file list, not a token one -- the limit is on the payload, and a
+    // survey with forty photos can exceed what the share sheet accepts even
+    // though a single file would pass.
+    if (navigator.canShare && navigator.canShare({ files: files })) {
+      navigator.share({ files: files, title: 'Geosurvey ' + day })
+        .catch(function () { /* cancelled */ });
+      return;
+    }
+    download(new Blob([text], { type: 'application/geo+json' }), gjName);
+    if (!files.length || files.length === 1) return;
+    // Sharing is unavailable or refused the payload: the photos still have to
+    // come out, so they are downloaded one by one. Said plainly rather than
+    // firing off a dozen silent downloads.
+    if (confirm('The GeoJSON has been saved.\n\nDownload the ' + (files.length - 1) +
+                ' photos as separate files as well?')) {
+      files.slice(1).forEach(function (f, i) {
+        setTimeout(function () { download(f, f.name); }, i * 350);
+      });
+    }
+  }).catch(function (e) {
+    btn.disabled = false; btn.textContent = 'Export';
+    alert('Export failed.\n\n' + (e && e.message ? e.message : ''));
+  });
 });
 
 /* ── start ──────────────────────────────────────────────────────────────── */
