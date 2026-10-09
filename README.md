@@ -113,10 +113,10 @@ with a permission error that reads as the user having denied it. Options:
 
 ## Point capture
 
-Green **+** records a point at the current fix. Press and hold on the map to
-place one somewhere you cannot stand. Tap a recorded point to edit or delete it.
-**List** shows them newest first and flies to whichever you pick; **Export**
-hands out a GeoJSON file.
+**Add Features** in the panel records a point at the current fix. Press and hold
+on the map to place one somewhere you cannot stand. Tap a recorded point to edit
+or delete it. **List** shows them newest first and flies to whichever you pick;
+**Export** hands out the GeoJSON and the photos.
 
 ### Changing the form
 
@@ -124,22 +124,49 @@ The form *is* this array, near the bottom of `index.html`:
 
 ```js
 var FIELDS = [
-  { key: 'station', label: 'Station', type: 'text', required: true, auto: nextStation },
-  { key: 'type',    label: 'Observation', type: 'select',
-    options: ['Outcrop', 'Soil', 'Water', 'Structure', 'Sample', 'Photo point', 'Other'] },
-  { key: 'notes',   label: 'Notes', type: 'textarea' }
+  { key: 'station',     label: 'Station', type: 'text', required: true, auto: nextStation },
+  { key: 'type',        label: 'Observation', type: 'select', options: [...] },
+  { key: 'technician',  label: 'Technician', type: 'text', auto: lastTech },
+  { key: 'description', label: 'Description', type: 'textarea' },
+  { key: 'x_coord',     label: 'X (longitude)', ro: true, fill: c => +c.lon.toFixed(6) },
+  { key: 'y_coord',     label: 'Y (latitude)',  ro: true, fill: c => +c.lat.toFixed(6) },
+  { key: 'date',        label: 'Date', ro: true, fill: c => c.date },
+  { key: 'picture_id',  label: 'Picture ID', ro: true, live: true, fill: c => c.photos.slice() }
 ];
 ```
 
-Add, rename or remove a field there and the form, the stored records and the
-export all follow — nothing else needs editing. `type` is `text`, `select`,
-`number` or `textarea`; `auto` is a function returning the value to prefill on a
-new point. The fields above are a placeholder for whatever you actually record;
-they are a guess, not a recommendation.
+Add, rename or remove a field and the form, the stored records and the export
+all follow — nothing else needs editing.
 
-Position, accuracy and time are deliberately **not** in `FIELDS`. They are
-recorded automatically and cannot be edited — a field record whose coordinates
-can be typed over is not a measurement.
+| | |
+|---|---|
+| `type` | `text`, `select`, `number`, `textarea` |
+| `auto` | fn returning the value to prefill on a new point |
+| `ro` | shown but not editable; its value comes from `fill()` |
+| `fill` | `fn(ctx)` run on save; ctx is `{lon, lat, acc, alt, src, date, photos}` |
+| `live` | a read-only field recomputed on *every* save, not just the first |
+
+**`x_coord`, `y_coord`, `date` and `picture_id` are read-only on purpose.** They
+are measurements and bookkeeping, not opinions — a field record whose
+coordinates can be typed over is not a measurement. They still show in the form
+and appear as columns in the export, which is what a table wants. They are
+filled before you save, so what is about to be recorded is visible rather than
+only discoverable afterwards.
+
+Editing a point keeps its original position and date; only `picture_id` is
+recomputed, since photos can be added or removed at any time.
+
+**Technician carries forward** from the last point recorded. One person usually
+records all day, and retyping a name at every station is how it ends up spelled
+three different ways in one survey.
+
+Underscores rather than the hyphens in *x-coord* / *y-coord*: a hyphen is legal
+in JSON but breaks the moment this goes into a shapefile or most desktop GIS
+field names, which is where survey data usually ends up.
+
+Records written before these fields existed are migrated in place on load — `at`
+→ `date`, `notes` → `description`, `photos` → `picture_id`, and `x_coord`/
+`y_coord` filled from the geometry — so there is never a half-empty column.
 
 ### Two things it is careful about
 
@@ -163,17 +190,21 @@ better, red at 30 m or worse.
 {
   "type": "Feature",
   "properties": {
-    "src": "gps", "at": "2026-10-09T03:57:16.703Z",
-    "station": "S001", "type": "Outcrop", "notes": "Sandstone, cross-bedded",
+    "src": "gps", "station": "S001", "type": "Soil",
+    "technician": "J. Devoy", "description": "Coarse sand",
+    "x_coord": -118.212945, "y_coord": 34.004312,
+    "date": "2026-10-09T07:22:13.427Z",
+    "picture_id": ["p1791522521909-122700"],
     "acc": 4.7, "alt": 58.2
   },
   "geometry": { "type": "Point", "coordinates": [-118.212945, 34.004312] }
 }
 ```
 
-`at` is when it was recorded, `acc` the GPS accuracy in metres, `alt` the
-altitude in metres, `src` either `gps` or `placed`. Coordinates are rounded to
-six decimals — about 0.1 m, far finer than any phone fix.
+`acc` is the GPS accuracy in metres, `alt` the altitude in metres, `src` either
+`gps` or `placed`. Coordinates are rounded to six decimals — about 0.1 m, far
+finer than any phone fix. `picture_id` holds internal ids in the stored record
+and becomes a filename list on export.
 
 ### Photos
 
@@ -219,9 +250,10 @@ swallowed, but the honest protection is getting the data off the phone.
 
 One share: the GeoJSON **and every photo** as separate files. Photos are renamed
 on the way out — `S001-1.jpg`, `S001-2.jpg`, beside the `S001` record, with
-`properties.photos` listing those names. The internal ids stay inside the app,
-where a station can be renamed at any time and a filename derived from it would
-go stale.
+`picture_id` carrying those names as one `"; "`-joined string rather than an
+array, because this is a table column and an array in a cell does not survive a
+shapefile or a CSV. The internal ids stay inside the app, where a station can be
+renamed at any time and a filename derived from it would go stale.
 
 It prefers the iOS share sheet — Mail, AirDrop, iCloud directly — because a
 download on iOS lands in Files and is then awkward to move anywhere useful.

@@ -127,18 +127,22 @@
   .mapboxgl-ctrl-attrib { font-size: 10px; }
 
   /* ── capture ───────────────────────────────────────────────────────────── */
+  /* In the panel rather than floating over the map. One obvious place to start
+     a record beats a button that can be mistaken for a map control. */
   .cap {
-    position: fixed; right: 10px; z-index: 5;
-    bottom: calc(var(--above) + 86px);
-    width: 56px; height: 56px; padding: 0;
-    border: 1px solid var(--accent); border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    width: 100%; min-height: 48px; margin-bottom: 9px; padding: 0 14px;
+    font: inherit; font-size: 15px; font-weight: 600;
+    border: 1px solid var(--accent); border-radius: 10px;
     background: var(--accent); color: #fff;
-    box-shadow: 0 1px 2px rgba(0,0,0,.05), 0 6px 18px rgba(0,0,0,.2);
     cursor: pointer; touch-action: manipulation;
-    display: flex; align-items: center; justify-content: center;
   }
-  .cap svg { width: 26px; height: 26px; display: block; }
+  .cap svg { width: 19px; height: 19px; display: block; flex: none; }
   .cap:disabled { background: #fff; color: #b4b4ae; border-color: var(--line); }
+  .seglab {
+    font-size: 10.5px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+    color: #9a9a93; margin: 0 2px 5px;
+  }
 
   /* Count and export, only once something has been recorded. */
   .tally {
@@ -309,14 +313,15 @@
   </svg>
 </button>
 
-<button class="cap" id="cap" type="button" aria-label="Record a point here" title="Record a point here">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
-       stroke-linecap="round" aria-hidden="true">
-    <path d="M12 5v14M5 12h14"></path>
-  </svg>
-</button>
-
 <div class="bar">
+  <button class="cap" id="cap" type="button" title="Record a point at your location">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"
+         stroke-linecap="round" aria-hidden="true">
+      <path d="M12 5v14M5 12h14"></path>
+    </svg>
+    <span>Add Features</span>
+  </button>
+  <div class="seglab">Base map</div>
   <div class="seg" role="group" aria-label="Base map">
     <button id="b-light" type="button" aria-pressed="false">Light</button>
     <button id="b-sat"   type="button" aria-pressed="false">Satellite</button>
@@ -690,17 +695,45 @@ map.on('dragstart', function () {
      options   for select
      required  blocks Save when empty
      auto      a function returning the value to prefill on a NEW point
+     ro        shown but not editable; its value comes from fill()
+     fill      fn(ctx) -> value, run on save. ctx is
+               { lon, lat, acc, alt, src, date, photos }
+     live      a read-only field that is recomputed on every save rather than
+               only when the point is first recorded
 
-   Position, accuracy and time are NOT in here. They are recorded automatically
-   on every point and must not be editable -- a field record whose coordinates
-   can be typed over is not a measurement.
+   x_coord, y_coord, date and picture_id are read-only on purpose. They are
+   measurements and bookkeeping, not opinions -- a field record whose
+   coordinates can be typed over is not a measurement. They still appear in the
+   form, and as columns in the export, which is what a table wants.
+
+   Underscores rather than the hyphens in x-coord / y-coord: a hyphen is legal
+   in JSON but breaks the moment this is taken into a shapefile or most desktop
+   GIS field names, which is where survey data usually ends up.
    ========================================================================= */
 var FIELDS = [
   { key: 'station', label: 'Station', type: 'text', required: true, auto: nextStation },
   { key: 'type', label: 'Observation', type: 'select',
     options: ['Outcrop', 'Soil', 'Water', 'Structure', 'Sample', 'Photo point', 'Other'] },
-  { key: 'notes', label: 'Notes', type: 'textarea' }
+  // Carried over from the last point recorded: one person usually records all
+  // day, and retyping a name at every station is how it ends up spelled three
+  // different ways in one survey.
+  { key: 'technician', label: 'Technician', type: 'text', auto: lastTech },
+  { key: 'description', label: 'Description', type: 'textarea' },
+  { key: 'x_coord', label: 'X (longitude)', ro: true,
+    fill: function (c) { return +c.lon.toFixed(6); } },
+  { key: 'y_coord', label: 'Y (latitude)', ro: true,
+    fill: function (c) { return +c.lat.toFixed(6); } },
+  { key: 'date', label: 'Date', ro: true, fill: function (c) { return c.date; } },
+  // live: photos can be added or removed on any edit, so unlike the position
+  // this one is rewritten every save.
+  { key: 'picture_id', label: 'Picture ID', ro: true, live: true,
+    fill: function (c) { return c.photos.slice(); } }
 ];
+
+// The last technician entered, so the next point starts with it already there.
+function lastTech() {
+  try { return localStorage.getItem('geosurvey.tech') || ''; } catch (e) { return ''; }
+}
 
 var PT_STORE = 'geosurvey.points.v1';
 
@@ -713,6 +746,24 @@ var PTS = (function () {
     if (o && o.type === 'FeatureCollection' && Array.isArray(o.features)) return o;
   } catch (e) { /* fall through to empty */ }
   return { type: 'FeatureCollection', features: [] };
+})();
+
+/* Anything recorded before these fields existed is brought forward in place,
+   once, on load. Renaming the keys and leaving old records behind would mean
+   two shapes in one file and a table with half-empty columns. */
+(function migrate() {
+  var touched = false;
+  PTS.features.forEach(function (f) {
+    var p = f.properties, c = f.geometry && f.geometry.coordinates;
+    if (p.at && p.date == null) { p.date = p.at; delete p.at; touched = true; }
+    if (p.notes != null && p.description == null) {
+      p.description = p.notes; delete p.notes; touched = true;
+    }
+    if (p.photos && p.picture_id == null) { p.picture_id = p.photos; delete p.photos; touched = true; }
+    if (c && p.x_coord == null) { p.x_coord = +c[0].toFixed(6); p.y_coord = +c[1].toFixed(6); touched = true; }
+    if (!Array.isArray(p.picture_id)) { p.picture_id = []; touched = true; }
+  });
+  if (touched) { try { localStorage.setItem(PT_STORE, JSON.stringify(PTS)); } catch (e) {} }
 })();
 
 function savePts() {
@@ -985,7 +1036,7 @@ function openSheet(feature, fix) {
   var p = feature ? feature.properties : {};
   var pos = feature ? {
     lon: feature.geometry.coordinates[0], lat: feature.geometry.coordinates[1],
-    acc: (p.acc == null ? null : p.acc), at: p.at
+    acc: (p.acc == null ? null : p.acc), at: p.date
   } : { lon: fix.lon, lat: fix.lat, acc: fix.acc, at: null };
 
   document.getElementById('sheet-title').firstChild.nodeValue =
@@ -998,6 +1049,27 @@ function openSheet(feature, fix) {
   FIELDS.forEach(function (f) {
     var v = feature ? (p[f.key] == null ? '' : p[f.key])
                     : (typeof f.auto === 'function' ? f.auto() : '');
+
+    // Read-only fields show the value they will be given, so what is about to
+    // be recorded is visible before Save rather than only afterwards.
+    if (f.ro) {
+      var shown;
+      if (feature && !f.live) {
+        shown = Array.isArray(v) ? v.length : v;
+      } else {
+        var ctx = feature
+          ? { lon: feature.geometry.coordinates[0], lat: feature.geometry.coordinates[1],
+              date: p.date, photos: sheetShots }
+          : { lon: pos.lon, lat: pos.lat, date: '(on save)', photos: [] };
+        shown = f.fill(ctx);
+      }
+      if (f.key === 'picture_id') shown = (Array.isArray(shown) ? shown.length : 0) + ' attached';
+      html += '<div class="fld"><label for="f-' + f.key + '">' + esc(f.label) + '</label>' +
+              '<input id="f-' + f.key + '" type="text" value="' + esc(shown) + '" readonly ' +
+              'tabindex="-1" style="background:#f6f6f2;color:#6b6b66"></div>';
+      return;
+    }
+
     html += '<div class="fld"><label for="f-' + f.key + '">' + esc(f.label) +
             (f.required ? ' *' : '') + '</label>';
     if (f.type === 'select') {
@@ -1020,7 +1092,7 @@ function openSheet(feature, fix) {
   document.getElementById('sheet-body').innerHTML = html;
   document.getElementById('sheet-body').onclick = null;   // not the list view
 
-  sheetShots = (feature && Array.isArray(p.photos)) ? p.photos.slice() : [];
+  sheetShots = (feature && Array.isArray(p.picture_id)) ? p.picture_id.slice() : [];
   shotsAdded = []; shotsRemoved = [];
   renderShots();
 
@@ -1036,9 +1108,10 @@ function openSheet(feature, fix) {
 }
 
 function saveSheet() {
-  var vals = {};
-  for (var i = 0; i < FIELDS.length; i++) {
-    var f = FIELDS[i];
+  var vals = {}, i, f;
+  for (i = 0; i < FIELDS.length; i++) {
+    f = FIELDS[i];
+    if (f.ro) continue;                 // computed below, never read off the form
     var el = document.getElementById('f-' + f.key);
     var v = el ? String(el.value).trim() : '';
     if (f.required && !v) {
@@ -1048,6 +1121,24 @@ function saveSheet() {
     }
     vals[f.key] = v;
   }
+  if (vals.technician) {
+    try { localStorage.setItem('geosurvey.tech', vals.technician); } catch (e) {}
+  }
+
+  // The read-only fields, derived rather than typed. On an edit only the live
+  // ones are recomputed: the position and the date belong to when the point was
+  // recorded, not to when it was last touched.
+  var base = editing
+    ? { lon: editing.geometry.coordinates[0], lat: editing.geometry.coordinates[1],
+        acc: editing.properties.acc, alt: editing.properties.alt,
+        src: editing.properties.src, date: editing.properties.date, photos: sheetShots }
+    : { lon: pendingFix.lon, lat: pendingFix.lat, acc: pendingFix.acc, alt: pendingFix.alt,
+        src: pendingFix.src, date: new Date().toISOString(), photos: sheetShots };
+  FIELDS.forEach(function (fd) {
+    if (!fd.ro) return;
+    if (editing && !fd.live) return;    // keep what was recorded at the time
+    vals[fd.key] = fd.fill(base);
+  });
 
   // Save commits the photo changes: blobs dropped from the form go now, and
   // the ones added stop being provisional.
@@ -1055,14 +1146,14 @@ function saveSheet() {
   shotsRemoved = []; shotsAdded = [];
 
   if (editing) {
-    FIELDS.forEach(function (f) { editing.properties[f.key] = vals[f.key]; });
-    editing.properties.photos = sheetShots.slice();
+    FIELDS.forEach(function (fd) {
+      if (vals.hasOwnProperty(fd.key)) editing.properties[fd.key] = vals[fd.key];
+    });
     editing.properties.edited = new Date().toISOString();
   } else {
-    var props = { src: pendingFix.src, at: new Date().toISOString() };
-    FIELDS.forEach(function (f) { props[f.key] = vals[f.key]; });
-    props.photos = sheetShots.slice();
-    // Measured values live beside the typed ones, not inside the form.
+    var props = { src: pendingFix.src };
+    FIELDS.forEach(function (fd) { props[fd.key] = vals[fd.key]; });
+    // Measured values that are not form fields.
     props.acc = pendingFix.acc;
     props.alt = pendingFix.alt == null ? null : Math.round(pendingFix.alt * 10) / 10;
     PTS.features.push({
@@ -1077,7 +1168,7 @@ function saveSheet() {
 
 function deleteSheet() {
   if (!editing) return;
-  var shots = Array.isArray(editing.properties.photos) ? editing.properties.photos : [];
+  var shots = Array.isArray(editing.properties.picture_id) ? editing.properties.picture_id : [];
   if (!confirm('Delete point ' + (editing.properties.station || '') +
                (shots.length ? ' and its ' + shots.length + ' photo' + (shots.length === 1 ? '' : 's') : '') +
                '?')) return;
@@ -1117,9 +1208,9 @@ map.on('click', 'pt-dot', function (e) {
   // queryRenderedFeatures returns a copy, so the stored feature is found by
   // identity of its values rather than used directly -- editing the copy would
   // change nothing.
-  var st = hit.properties.station, at = hit.properties.at;
+  var st = hit.properties.station, at = hit.properties.date;
   var f = PTS.features.filter(function (x) {
-    return x.properties.station === st && x.properties.at === at;
+    return x.properties.station === st && x.properties.date === at;
   })[0];
   if (f) openSheet(f, null);
 });
@@ -1133,14 +1224,14 @@ document.getElementById('btn-list').addEventListener('click', function () {
     PTS.features.length + ' points';
   // Newest first: the one just recorded is the one most likely wanted.
   var rows = PTS.features.slice().sort(function (a, b) {
-    return String(b.properties.at || '').localeCompare(String(a.properties.at || ''));
+    return String(b.properties.date || '').localeCompare(String(a.properties.date || ''));
   });
   document.getElementById('sheet-body').innerHTML = '<div class="plist">' +
     rows.map(function (f) {
       var p = f.properties;
-      var n = Array.isArray(p.photos) ? p.photos.length : 0;
+      var n = Array.isArray(p.picture_id) ? p.picture_id.length : 0;
       return '<button class="prow" type="button" data-st="' + esc(p.station) +
-             '" data-at="' + esc(p.at) + '">' +
+             '" data-at="' + esc(p.date) + '">' +
              '<b>' + esc(p.station || '—') + '</b>' +
              '<span class="t">' + esc(p.type || '') +
              (n ? ' · ' + n + ' photo' + (n === 1 ? '' : 's') : '') + '</span>' +
@@ -1151,7 +1242,7 @@ document.getElementById('btn-list').addEventListener('click', function () {
   // What the survey is costing on the device. The binding constraint here is
   // storage, not anything else, and it is invisible until it runs out.
   var nShots = PTS.features.reduce(function (a, f) {
-    return a + (Array.isArray(f.properties.photos) ? f.properties.photos.length : 0);
+    return a + (Array.isArray(f.properties.picture_id) ? f.properties.picture_id.length : 0);
   }, 0);
   var useEl = document.getElementById('use');
   useEl.textContent = nShots + ' photo' + (nShots === 1 ? '' : 's') + ' stored';
@@ -1172,7 +1263,7 @@ document.getElementById('btn-list').addEventListener('click', function () {
     if (!b) return;
     var f = PTS.features.filter(function (x) {
       return String(x.properties.station) === b.getAttribute('data-st') &&
-             String(x.properties.at) === b.getAttribute('data-at');
+             String(x.properties.date) === b.getAttribute('data-at');
     })[0];
     if (!f) return;
     map.easeTo({ center: f.geometry.coordinates, zoom: Math.max(map.getZoom(), 17), duration: 600 });
@@ -1206,13 +1297,15 @@ document.getElementById('btn-export').addEventListener('click', function () {
   PTS.features.forEach(function (f) {
     var p = {}, i;
     for (i in f.properties) if (f.properties.hasOwnProperty(i)) p[i] = f.properties[i];
-    var ids = Array.isArray(p.photos) ? p.photos : [];
+    var ids = Array.isArray(p.picture_id) ? p.picture_id : [];
     var st = String(p.station || 'point').replace(/[^A-Za-z0-9_-]/g, '_');
-    p.photos = ids.map(function (id, n) {
+    // Joined into one string rather than left as an array: this is a table
+    // column, and an array in a cell does not survive a shapefile or a CSV.
+    p.picture_id = ids.map(function (id, n) {
       var nm = st + '-' + (n + 1) + '.jpg';
       wanted.push({ id: id, name: nm });
       return nm;
-    });
+    }).join('; ');
     out.features.push({ type: 'Feature', properties: p, geometry: f.geometry });
   });
 
