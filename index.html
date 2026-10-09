@@ -247,6 +247,41 @@
   .addshot input { display: none; }
   .addshot.busy { color: var(--accent); border-color: var(--accent); }
 
+  /* ── identification ───────────────────────────────────────────────────── */
+  .idbtn {
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    width: 100%; min-height: 44px; margin-top: 4px; padding: 0 12px;
+    font: inherit; font-size: 14px; font-weight: 560;
+    border: 1px solid #c8d8d2; border-radius: 9px; background: #f2f8f6; color: #22564a;
+    cursor: pointer; touch-action: manipulation;
+  }
+  .idbtn:disabled { background: #fafaf7; color: #b4b4ae; border-color: var(--line); }
+  .organs { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+  .organs button {
+    flex: 1 0 auto; min-width: 58px; min-height: 36px; font: inherit; font-size: 12.5px;
+    border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink);
+    cursor: pointer; touch-action: manipulation;
+  }
+  .organs button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+
+  .idlist { padding: 2px 0 8px; }
+  .idrow {
+    display: flex; gap: 10px; align-items: baseline; width: 100%; text-align: left;
+    padding: 11px 16px; border: 0; border-bottom: 1px solid #f1f1ec;
+    background: #fff; font: inherit; cursor: pointer; touch-action: manipulation;
+  }
+  .idrow i { font-style: italic; font-weight: 600; font-size: 14px; }
+  .idrow .c { color: var(--ink-soft); font-size: 12px; flex: 1; }
+  .idrow .s {
+    font-size: 12px; font-variant-numeric: tabular-nums; font-weight: 640;
+    color: var(--ink-soft);
+  }
+  .idrow .s.hi { color: var(--accent); }
+  .idrow .s.lo { color: var(--warn); }
+  .idnote {
+    padding: 9px 16px 2px; font-size: 11.5px; line-height: 1.5; color: var(--ink-soft);
+  }
+
   /* Full-screen viewer. Dark, because a photo of an outcrop is being judged
      here and a white surround skews how it reads. */
   .viewer {
@@ -343,6 +378,13 @@
     <span class="sp"></span>
     <button type="button" class="del" id="viewer-del">Delete photo</button>
   </div>
+</div>
+
+<div class="scrim" id="idscrim"></div>
+<div class="sheet" id="idbox" role="dialog" aria-modal="true" aria-labelledby="idbox-title">
+  <h2 id="idbox-title">Pl@ntNet<span class="sp"></span>
+    <button class="x" id="idbox-x" type="button" aria-label="Close">&times;</button></h2>
+  <div class="body" id="idbox-body"></div>
 </div>
 
 <div class="scrim" id="scrim"></div>
@@ -713,12 +755,25 @@ map.on('dragstart', function () {
 var FIELDS = [
   { key: 'station', label: 'Station', type: 'text', required: true, auto: nextStation },
   { key: 'type', label: 'Observation', type: 'select',
-    options: ['Outcrop', 'Soil', 'Water', 'Structure', 'Sample', 'Photo point', 'Other'] },
+    options: ['Tree', 'Shrub', 'Outcrop', 'Soil', 'Water', 'Structure', 'Sample',
+              'Photo point', 'Other'] },
   // Carried over from the last point recorded: one person usually records all
   // day, and retyping a name at every station is how it ends up spelled three
   // different ways in one survey.
   { key: 'technician', label: 'Technician', type: 'text', auto: lastTech },
+  // Filled by Pl@ntNet when an identification is accepted, and editable
+  // afterwards -- the model proposes, the surveyor decides.
+  { key: 'species', label: 'Species', type: 'text' },
+  { key: 'common_name', label: 'Common name', type: 'text' },
   { key: 'description', label: 'Description', type: 'textarea' },
+  // Provenance for the determination. Kept beside the name because "Quercus
+  // agrifolia" at 0.92 from a bark photo and the same name typed by hand are
+  // not the same claim, and six months later nothing else would tell them
+  // apart.
+  { key: 'id_score', label: 'ID confidence', ro: true, live: true,
+    fill: function (c) { return c.idScore; } },
+  { key: 'id_source', label: 'ID source', ro: true, live: true,
+    fill: function (c) { return c.idSource; } },
   { key: 'x_coord', label: 'X (longitude)', ro: true,
     fill: function (c) { return +c.lon.toFixed(6); } },
   { key: 'y_coord', label: 'Y (latitude)', ro: true,
@@ -913,6 +968,8 @@ function shrink(file) {
    Deleting the blob at the moment the user taps Delete would leave the saved
    record pointing at nothing if they then cancelled. */
 var sheetShots = [], shotsAdded = [], shotsRemoved = [], shotUrls = [];
+// The determination attached to the form: score and where it came from.
+var sheetId = { score: '', source: '' };
 
 function freeShotUrls() {
   shotUrls.forEach(function (u) { URL.revokeObjectURL(u); });
@@ -999,6 +1056,190 @@ document.getElementById('viewer-del').addEventListener('click', function () {
   renderShots();
 });
 
+/* ===========================================================================
+   Pl@ntNet identification
+   ---------------------------------------------------------------------------
+   The photos already attached to a point are sent to Pl@ntNet, which returns
+   candidate species with a confidence score. Pl@ntNet allows browser requests
+   outright -- it echoes the page's origin back in access-control-allow-origin
+   -- so this talks to the API directly and needs no server of its own.
+
+   WHERE THE KEY LIVES, AND WHY IT IS NOT IN THIS FILE
+   ---------------------------------------------------
+   A Pl@ntNet key is tied to an account and a daily quota, and this site is
+   public: a key written into this page would be readable by anyone who views
+   source, and the first thing they could do is spend the quota. So the key is
+   never committed. It is typed in once on the phone and kept in localStorage
+   on that device alone.
+
+   The consequence, which is deliberate: each device has to be given the key
+   once. If this ever needs handing to a crew who should not hold it, the fix
+   is a proxy holding it as a server secret -- the same Cloudflare Worker
+   pattern already used to put a password on geonomics.online -- not embedding
+   it here.
+   ========================================================================= */
+var PN_URL = 'https://my-api.plantnet.org/v2/identify/';
+var PN_PROJECT = 'all';          // or a regional flora from /v2/projects
+var PN_KEY_STORE = 'geosurvey.plantnet.key';
+var PN_MAX_IMAGES = 5;           // the API's own limit per request
+
+function pnKey() {
+  try { return localStorage.getItem(PN_KEY_STORE) || ''; } catch (e) { return ''; }
+}
+function pnSetKey(k) {
+  try {
+    if (k) localStorage.setItem(PN_KEY_STORE, k);
+    else localStorage.removeItem(PN_KEY_STORE);
+  } catch (e) {}
+}
+function pnAskKey() {
+  var k = prompt(
+    'Pl@ntNet API key\n\n' +
+    'From my.plantnet.org — Settings, then API. It is stored on this device ' +
+    'only and is never sent anywhere but Pl@ntNet.\n\n' +
+    'Leave blank to clear it.', pnKey());
+  if (k === null) return false;                 // cancelled
+  pnSetKey(k.trim());
+  return !!k.trim();
+}
+
+var ORGANS = [
+  ['auto', 'Auto'], ['leaf', 'Leaf'], ['bark', 'Bark'],
+  ['flower', 'Flower'], ['fruit', 'Fruit']
+];
+// Bark, because this is for tree survey: in winter, and for a mature trunk out
+// of reach of its own canopy, bark is often the only organ to hand. Remembered
+// between points, since a survey tends to photograph the same organ all day.
+var organ = (function () {
+  try { return localStorage.getItem('geosurvey.organ') || 'auto'; } catch (e) { return 'auto'; }
+})();
+function setOrgan(o) {
+  organ = o;
+  try { localStorage.setItem('geosurvey.organ', o); } catch (e) {}
+  var host = document.getElementById('organs');
+  if (host) {
+    [].slice.call(host.querySelectorAll('button')).forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.getAttribute('data-o') === o));
+    });
+  }
+}
+
+/* Sends up to five of this point's photos in one request. More than one image
+   of the same tree genuinely improves the result -- Pl@ntNet scores the set,
+   not each picture -- which is why the photos already on the record are used
+   rather than asking for a fresh one. */
+function pnIdentify() {
+  var key = pnKey();
+  if (!key && !pnAskKey()) return;
+  key = pnKey();
+  if (!key) return;
+
+  var ids = sheetShots.slice(0, PN_MAX_IMAGES);
+  if (!ids.length) { alert('Add a photo first.'); return; }
+
+  var btn = document.getElementById('idbtn');
+  btn.disabled = true; btn.textContent = 'Identifying…';
+
+  Promise.all(ids.map(function (id) { return shotGet(id); })).then(function (blobs) {
+    var fd = new FormData();
+    blobs.filter(Boolean).forEach(function (b, i) {
+      fd.append('images', b, 'image' + i + '.jpg');
+      // One organ per image, and the counts must match.
+      fd.append('organs', organ);
+    });
+    var url = PN_URL + PN_PROJECT + '?api-key=' + encodeURIComponent(key) +
+              '&nb-results=6&lang=en';
+    return fetch(url, { method: 'POST', body: fd }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        return { status: r.status, body: j };
+      });
+    });
+  }).then(function (res) {
+    btn.disabled = false; btn.textContent = 'Identify with Pl@ntNet';
+    var j = res.body || {};
+
+    if (res.status === 401) {
+      if (confirm('Pl@ntNet rejected the API key.\n\nEnter a different one?')) {
+        if (pnAskKey()) pnIdentify();
+      }
+      return;
+    }
+    if (res.status === 429) {
+      alert('Pl@ntNet daily quota is used up.\n\nIt resets at 00:00 UTC. The ' +
+            'photos are saved on the point, so this can be identified later.');
+      return;
+    }
+    if (res.status === 404 || !(j.results && j.results.length)) {
+      alert('No match.\n\n' +
+            (organ === 'auto'
+              ? 'Try naming the organ — bark, leaf, flower or fruit — rather than Auto.'
+              : 'Try a different organ, or a closer photo.'));
+      return;
+    }
+    if (res.status !== 200) {
+      alert('Pl@ntNet returned an error.\n\n' + (j.message || ('HTTP ' + res.status)));
+      return;
+    }
+    showIdResults(j);
+  }).catch(function (e) {
+    btn.disabled = false; btn.textContent = 'Identify with Pl@ntNet';
+    alert('Could not reach Pl@ntNet.\n\n' +
+          'If you are out of signal, the photos are saved on the point and this ' +
+          'can be run later.\n\n' + (e && e.message ? e.message : ''));
+  });
+}
+
+/* Results go in their own overlay rather than replacing the form, so whatever
+   has been typed is still there when one is chosen or the list is dismissed. */
+function showIdResults(j) {
+  var left = j.remainingIdentificationRequests;
+  var rows = (j.results || []).slice(0, 6).map(function (r, i) {
+    var sp = r.species || {};
+    var sci = sp.scientificNameWithoutAuthor || sp.scientificName || '';
+    var com = (sp.commonNames || [])[0] || '';
+    var fam = (sp.family || {}).scientificNameWithoutAuthor || '';
+    var pct = Math.round((r.score || 0) * 100);
+    var cls = pct >= 50 ? 'hi' : pct < 15 ? 'lo' : '';
+    return '<button class="idrow" type="button" data-i="' + i + '">' +
+           '<i>' + esc(sci) + '</i>' +
+           '<span class="c">' + esc([com, fam].filter(Boolean).join(' · ')) + '</span>' +
+           '<span class="s ' + cls + '">' + pct + '%</span></button>';
+  }).join('');
+
+  document.getElementById('idbox-body').innerHTML =
+    '<div class="idlist">' + rows + '</div>' +
+    '<div class="idnote">Scores are the model’s confidence, not proof. ' +
+    'Pick one to record it with its score, or close to leave the species as it is.' +
+    (typeof left === 'number' ? '<br>' + left + ' identifications left today.' : '') +
+    '</div>';
+
+  document.getElementById('idbox-body').onclick = function (ev) {
+    var b = ev.target.closest ? ev.target.closest('.idrow') : null;
+    if (!b) return;
+    var r = j.results[+b.getAttribute('data-i')];
+    var sp = r.species || {};
+    var sci = sp.scientificNameWithoutAuthor || sp.scientificName || '';
+    var com = (sp.commonNames || [])[0] || '';
+    var el;
+    if ((el = document.getElementById('f-species'))) el.value = sci;
+    if ((el = document.getElementById('f-common_name'))) el.value = com;
+    // Recorded with the determination so the claim can be weighed later.
+    sheetId.score = Math.round((r.score || 0) * 1000) / 1000;
+    sheetId.source = 'Pl@ntNet ' + (j.version || '') + ' · ' + organ;
+    if ((el = document.getElementById('f-id_score'))) el.value = sheetId.score;
+    if ((el = document.getElementById('f-id_source'))) el.value = sheetId.source;
+    closeIdBox();
+  };
+  document.getElementById('idbox').className = 'sheet on';
+  document.getElementById('idscrim').className = 'scrim on';
+}
+function closeIdBox() {
+  document.getElementById('idbox').className = 'sheet';
+  document.getElementById('idscrim').className = 'scrim';
+}
+document.getElementById('idbox-x').addEventListener('click', closeIdBox);
+document.getElementById('idscrim').addEventListener('click', closeIdBox);
+
 /* ── the sheet ───────────────────────────────────────────────────────────── */
 var SHEET = document.getElementById('sheet');
 var SCRIM = document.getElementById('scrim');
@@ -1064,6 +1305,9 @@ function openSheet(feature, fix) {
         shown = f.fill(ctx);
       }
       if (f.key === 'picture_id') shown = (Array.isArray(shown) ? shown.length : 0) + ' attached';
+      if (f.key === 'id_score' || f.key === 'id_source') {
+        shown = feature ? (p[f.key] == null ? '' : p[f.key]) : '';
+      }
       html += '<div class="fld"><label for="f-' + f.key + '">' + esc(f.label) + '</label>' +
               '<input id="f-' + f.key + '" type="text" value="' + esc(shown) + '" readonly ' +
               'tabindex="-1" style="background:#f6f6f2;color:#6b6b66"></div>';
@@ -1088,13 +1332,29 @@ function openSheet(feature, fix) {
     }
     html += '</div>';
   });
-  html += '<div class="fld"><label>Photos</label><div class="shots" id="shots"></div></div>';
+  html += '<div class="fld"><label>Photos</label><div class="shots" id="shots"></div>' +
+          '<div class="organs" id="organs">' +
+          ORGANS.map(function (o) {
+            return '<button type="button" data-o="' + o[0] + '" aria-pressed="false">' +
+                   esc(o[1]) + '</button>';
+          }).join('') + '</div>' +
+          '<button type="button" class="idbtn" id="idbtn">Identify with Pl@ntNet</button>' +
+          '</div>';
   document.getElementById('sheet-body').innerHTML = html;
   document.getElementById('sheet-body').onclick = null;   // not the list view
 
   sheetShots = (feature && Array.isArray(p.picture_id)) ? p.picture_id.slice() : [];
   shotsAdded = []; shotsRemoved = [];
+  sheetId = { score: (feature && p.id_score != null) ? p.id_score : '',
+              source: (feature && p.id_source) ? p.id_source : '' };
   renderShots();
+
+  setOrgan(organ);
+  document.getElementById('organs').onclick = function (ev) {
+    var b = ev.target.closest ? ev.target.closest('button[data-o]') : null;
+    if (b) setOrgan(b.getAttribute('data-o'));
+  };
+  document.getElementById('idbtn').addEventListener('click', pnIdentify);
 
   document.getElementById('sheet-acts').innerHTML =
     (feature ? '<button type="button" class="del" id="a-del">Delete</button>' : '') +
@@ -1131,9 +1391,11 @@ function saveSheet() {
   var base = editing
     ? { lon: editing.geometry.coordinates[0], lat: editing.geometry.coordinates[1],
         acc: editing.properties.acc, alt: editing.properties.alt,
-        src: editing.properties.src, date: editing.properties.date, photos: sheetShots }
+        src: editing.properties.src, date: editing.properties.date, photos: sheetShots,
+        idScore: sheetId.score, idSource: sheetId.source }
     : { lon: pendingFix.lon, lat: pendingFix.lat, acc: pendingFix.acc, alt: pendingFix.alt,
-        src: pendingFix.src, date: new Date().toISOString(), photos: sheetShots };
+        src: pendingFix.src, date: new Date().toISOString(), photos: sheetShots,
+        idScore: sheetId.score, idSource: sheetId.source };
   FIELDS.forEach(function (fd) {
     if (!fd.ro) return;
     if (editing && !fd.live) return;    // keep what was recorded at the time
@@ -1253,8 +1515,12 @@ document.getElementById('btn-list').addEventListener('click', function () {
         (e.quota ? ' of about ' + Math.round(e.quota / 1048576) + ' MB available' : '');
     });
   }
+  // The key is otherwise only reachable when it is missing or rejected, which
+  // is no help for replacing one that still works.
   document.getElementById('sheet-acts').innerHTML =
+    '<button type="button" id="a-key">Pl@ntNet key</button>' +
     '<button type="button" class="save" id="a-close">Done</button>';
+  document.getElementById('a-key').addEventListener('click', function () { pnAskKey(); });
   document.getElementById('a-close').addEventListener('click', closeSheet);
   // Assigned, not added: List can be opened repeatedly, and addEventListener
   // would stack a new handler each time so one tap fired several.

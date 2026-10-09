@@ -224,6 +224,43 @@ the point already carries a position that was recorded deliberately, and a
 second, silent one buried in file metadata is a privacy leak waiting to be
 shared.
 
+### Identifying a tree with Pl@ntNet
+
+With at least one photo on the point, pick the organ — **Auto, Leaf, Bark,
+Flower, Fruit** — and tap **Identify with Pl@ntNet**. Up to five of that point's
+photos go in one request (Pl@ntNet scores the *set*, so several angles of the
+same tree genuinely help). Candidates come back with a confidence score; tap one
+and it fills `species`, `common_name`, `id_score` and `id_source`.
+
+The organ choice is remembered between points, since a survey tends to
+photograph the same organ all day. **Bark** matters for tree work: on a mature
+trunk out of reach of its own canopy, and in winter, it is often the only organ
+to hand.
+
+`species` and `common_name` stay **editable after an identification** — the
+model proposes, the surveyor decides. `id_score` and `id_source` are recorded
+alongside, because *Quercus agrifolia* at 0.91 from a bark photo and the same
+name typed by hand are not the same claim, and six months later nothing else
+would tell them apart. A score is the model's confidence, not proof.
+
+**Your API key is never in this repository.** A Pl@ntNet key is tied to your
+account and a daily quota, and this site is public — a key written into the page
+would be readable by anyone who views source, and the first thing they could do
+is spend your quota. Instead it is typed in once on the phone and kept in
+`localStorage` on that device alone. Change it any time from **List → Pl@ntNet
+key**.
+
+The deliberate consequence: **each device needs the key once**. If this ever
+goes to a crew who should not hold it, the fix is a proxy holding the key as a
+server secret — the same Cloudflare Worker pattern already used to put a
+password on geonomics.online — not embedding it here.
+
+Pl@ntNet permits browser requests outright (it echoes the page's origin back in
+`access-control-allow-origin`), so the app talks to the API directly and needs
+no server of its own. Quota exhaustion returns 429 and resets at 00:00 UTC;
+the app says so, and since the photos are on the record the point can be
+identified later. The same is true out of signal.
+
 ### Storage
 
 Points live in `localStorage` as one GeoJSON FeatureCollection. **Photos live in
