@@ -287,11 +287,46 @@ goes to a crew who should not hold it, the fix is a proxy holding the key as a
 server secret — the same Cloudflare Worker pattern already used to put a
 password on geonomics.online — not embedding it here.
 
-Pl@ntNet permits browser requests outright (it echoes the page's origin back in
-`access-control-allow-origin`), so the app talks to the API directly and needs
-no server of its own. Quota exhaustion returns 429 and resets at 00:00 UTC;
-the app says so, and since the photos are on the record the point can be
-identified later. The same is true out of signal.
+#### The origin must be authorized at Pl@ntNet — this will catch you out
+
+Browser use is **off by default**, and nothing in the key or the error says so
+plainly. In **my.plantnet.org → Settings**:
+
+1. tick **Expose my API key**
+2. under **Authorized domains**, one per line:
+
+```
+https://geosurvey.biz
+https://www.geosurvey.biz
+```
+
+Include the scheme, and list `www` separately — CORS treats `http://` and
+`https://`, and `example.com` and `www.example.com`, as different origins.
+**Leave Authorized IPs empty**: that is for calls from a fixed server, and a
+phone's address changes between cell towers and Wi-Fi networks, so pinning one
+would work at a desk and fail at the survey site.
+
+Until the origin is authorized the API answers **403** with
+`{"message":"CORS error: Origin not allowed"}`. Note the sequence, because it
+is misleading: a wrong key gives **401**, and **403 only appears once the key is
+right** — so the failure arrives exactly when the credential starts working.
+
+A caution for anyone testing this: an *unauthenticated* preflight passes from
+any origin and echoes `access-control-allow-origin` back, which looks like proof
+that browser calls are allowed. They are not. The origin is checked only once a
+real key is attached, so a CORS check without a key proves nothing. This README
+previously said the opposite, on exactly that evidence.
+
+Quota exhaustion returns 429 and resets at 00:00 UTC; the app says so, and since
+the photos are on the record the point can be identified later. The same is true
+out of signal.
+
+#### If identification misbehaves
+
+**List → Test Pl@ntNet key** prints the build, whether the app is running in a
+browser tab or a Home Screen launch, whether a key is held, and the HTTP status
+and reply body for four project variants. The reply body is where Pl@ntNet
+states the actual reason; everything above it is guesswork without it.
 
 ### Storage
 
