@@ -1242,7 +1242,7 @@ document.getElementById('viewer-del').addEventListener('click', function () {
    A Home Screen launch can serve a cached page for a long time with no obvious
    way to refresh, which makes "I tried the fix" and "the fix is on this device"
    two different claims. Bump this on every deploy. */
-var BUILD = '2026-10-09h';
+var BUILD = '2026-10-09i';
 
 var PN_URL = 'https://my-api.plantnet.org/v2/identify/';
 var PN_PROJECT = 'all';          // or a regional flora from /v2/projects
@@ -1389,35 +1389,66 @@ function pnTest(out) {
   lines.push('online ' + (navigator.onLine ? 'yes' : 'NO'));
   if (!key) { out.textContent = lines.join('\n') + '\n\nNo key to test.'; return; }
 
+  // A plausible photo rather than a 64 px grey square: a tiny flat image can
+  // itself be refused, which would read as a key problem when it is not.
   var c = document.createElement('canvas');
-  c.width = 64; c.height = 64;
-  var g = c.getContext('2d'); g.fillStyle = '#808080'; g.fillRect(0, 0, 64, 64);
+  c.width = 800; c.height = 600;
+  var g = c.getContext('2d');
+  var grd = g.createLinearGradient(0, 0, 800, 600);
+  grd.addColorStop(0, '#2f5d2a'); grd.addColorStop(1, '#8a6a3a');
+  g.fillStyle = grd; g.fillRect(0, 0, 800, 600);
+  for (var i = 0; i < 400; i++) {
+    g.fillStyle = 'rgba(' + (60 + i % 90) + ',' + (90 + i % 70) + ',40,.5)';
+    g.beginPath();
+    g.ellipse((i * 97) % 800, (i * 53) % 600, 14 + i % 22, 6 + i % 11, i, 0, 6.3);
+    g.fill();
+  }
+
   c.toBlob(function (b) {
-    var fd = new FormData();
-    fd.append('images', b, 'test.jpg');
-    fd.append('organs', 'leaf');
-    fetch(PN_URL + PN_PROJECT + '?api-key=' + encodeURIComponent(key) + '&nb-results=1&lang=en',
-          { method: 'POST', body: fd })
-      .then(function (r) {
-        return r.text().then(function (t) { return { s: r.status, t: t }; });
-      })
-      .then(function (r) {
-        lines.push('HTTP ' + r.s);
-        lines.push(
-          r.s === 200 ? '-> the key WORKS' :
-          r.s === 404 ? '-> the key WORKS (404 = no match on a grey square, which is expected)' :
-          r.s === 401 ? '-> the key is REJECTED. Re-paste it from my.plantnet.org → Settings → API' :
-          r.s === 429 ? '-> daily quota used up; resets at 00:00 UTC' :
-          '-> unexpected');
-        lines.push(r.t.slice(0, 200));
+    // Several variants, because a 403 does not say whether the objection is to
+    // the project, the parameters or the account. Running them together turns
+    // one round trip into an answer instead of another guess.
+    var cases = [
+      ['project all',            PN_URL + 'all?api-key=' + encodeURIComponent(key) + '&nb-results=6&lang=en'],
+      ['project all, no extras', PN_URL + 'all?api-key=' + encodeURIComponent(key)],
+      ['project k-world-flora',  PN_URL + 'k-world-flora?api-key=' + encodeURIComponent(key)],
+      ['project weurope',        PN_URL + 'weurope?api-key=' + encodeURIComponent(key)]
+    ];
+    var bodies = [];
+    var run = function (n) {
+      if (n >= cases.length) {
+        lines.push('');
+        lines.push('first reply body:');
+        lines.push(bodies[0] || '(none)');
         out.textContent = lines.join('\n');
-      })
-      .catch(function (e) {
-        lines.push('request FAILED before any reply');
-        lines.push((e && e.name ? e.name + ': ' : '') + (e && e.message ? e.message : ''));
-        lines.push('(no signal, or the request was blocked)');
-        out.textContent = lines.join('\n');
-      });
+        return;
+      }
+      var fd = new FormData();
+      fd.append('images', b, 'test.jpg');
+      fd.append('organs', 'leaf');
+      fetch(cases[n][1], { method: 'POST', body: fd })
+        .then(function (r) { return r.text().then(function (t) { return { s: r.status, t: t }; }); })
+        .then(function (r) {
+          var verdict =
+            (r.s === 200 || r.s === 404) ? 'WORKS' :
+            r.s === 401 ? 'key rejected' :
+            r.s === 403 ? 'forbidden' :
+            r.s === 429 ? 'quota spent' : '';
+          lines.push('  ' + cases[n][0] + ' -> ' + r.s + ' ' + verdict);
+          bodies.push(r.t.slice(0, 180));
+          out.textContent = lines.join('\n');
+          run(n + 1);
+        })
+        .catch(function (e) {
+          lines.push('  ' + cases[n][0] + ' -> request failed: ' +
+                     ((e && e.name) || '') + ' ' + ((e && e.message) || ''));
+          out.textContent = lines.join('\n');
+          run(n + 1);
+        });
+    };
+    lines.push('');
+    out.textContent = lines.join('\n') + '\n  testing…';
+    run(0);
   }, 'image/jpeg', 0.9);
 }
 
