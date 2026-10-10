@@ -1238,6 +1238,12 @@ document.getElementById('viewer-del').addEventListener('click', function () {
    pattern already used to put a password on geonomics.online -- not embedding
    it here.
    ========================================================================= */
+/* Stamped so there is never a question about which code a phone is running.
+   A Home Screen launch can serve a cached page for a long time with no obvious
+   way to refresh, which makes "I tried the fix" and "the fix is on this device"
+   two different claims. Bump this on every deploy. */
+var BUILD = '2026-10-09h';
+
 var PN_URL = 'https://my-api.plantnet.org/v2/identify/';
 var PN_PROJECT = 'all';          // or a regional flora from /v2/projects
 var PN_KEY_STORE = 'geosurvey.plantnet.key';
@@ -1362,6 +1368,57 @@ function pnIdentify() {
           'If you are out of signal, the photos are saved on the point and this ' +
           'can be run later.\n\n' + (e && e.message ? e.message : ''));
   });
+}
+
+/* Asks Pl@ntNet one question -- "is this key good?" -- and says exactly what
+   came back. A deliberately unidentifiable test image is sent, so a working key
+   answers 404 "no match": that still proves the key, the network and CORS, and
+   separates a credential problem from everything else without spending a real
+   identification on it.
+
+   Written on screen rather than into an alert, so it can be read twice and
+   quoted. */
+function pnTest(out) {
+  var key = pnKey();
+  out.textContent = 'Testing…';
+  var lines = [];
+  lines.push('build ' + BUILD);
+  lines.push('mode ' + (window.matchMedia('(display-mode: standalone)').matches ||
+             window.navigator.standalone ? 'HOME SCREEN app' : 'browser tab'));
+  lines.push('key ' + (key ? 'set, ' + key.length + ' chars, ends …' + key.slice(-4) : 'NOT SET'));
+  lines.push('online ' + (navigator.onLine ? 'yes' : 'NO'));
+  if (!key) { out.textContent = lines.join('\n') + '\n\nNo key to test.'; return; }
+
+  var c = document.createElement('canvas');
+  c.width = 64; c.height = 64;
+  var g = c.getContext('2d'); g.fillStyle = '#808080'; g.fillRect(0, 0, 64, 64);
+  c.toBlob(function (b) {
+    var fd = new FormData();
+    fd.append('images', b, 'test.jpg');
+    fd.append('organs', 'leaf');
+    fetch(PN_URL + PN_PROJECT + '?api-key=' + encodeURIComponent(key) + '&nb-results=1&lang=en',
+          { method: 'POST', body: fd })
+      .then(function (r) {
+        return r.text().then(function (t) { return { s: r.status, t: t }; });
+      })
+      .then(function (r) {
+        lines.push('HTTP ' + r.s);
+        lines.push(
+          r.s === 200 ? '-> the key WORKS' :
+          r.s === 404 ? '-> the key WORKS (404 = no match on a grey square, which is expected)' :
+          r.s === 401 ? '-> the key is REJECTED. Re-paste it from my.plantnet.org → Settings → API' :
+          r.s === 429 ? '-> daily quota used up; resets at 00:00 UTC' :
+          '-> unexpected');
+        lines.push(r.t.slice(0, 200));
+        out.textContent = lines.join('\n');
+      })
+      .catch(function (e) {
+        lines.push('request FAILED before any reply');
+        lines.push((e && e.name ? e.name + ': ' : '') + (e && e.message ? e.message : ''));
+        lines.push('(no signal, or the request was blocked)');
+        out.textContent = lines.join('\n');
+      });
+  }, 'image/jpeg', 0.9);
 }
 
 /* Results go in their own overlay rather than replacing the form, so whatever
@@ -1698,7 +1755,12 @@ document.getElementById('btn-list').addEventListener('click', function () {
              (n ? ' · ' + n + ' photo' + (n === 1 ? '' : 's') : '') + '</span>' +
              '<span class="w">' + (p.acc == null ? 'placed' : '±' + Math.round(p.acc) + ' m') +
              '</span></button>';
-    }).join('') + '</div><div class="use" id="use"></div>';
+    }).join('') + '</div><div class="use" id="use"></div>' +
+    '<div class="use"><button type="button" id="a-test" style="font:inherit;font-size:12.5px;' +
+    'min-height:34px;padding:0 11px;border:1px solid #c8d8d2;border-radius:8px;' +
+    'background:#f2f8f6;color:#22564a">Test Pl@ntNet key</button></div>' +
+    '<pre class="use" id="diag" style="white-space:pre-wrap;word-break:break-word;' +
+    'font:11px/1.45 ui-monospace,Menlo,monospace;margin:0"></pre>';
 
   // What the survey is costing on the device. The binding constraint here is
   // storage, not anything else, and it is invisible until it runs out.
@@ -1727,6 +1789,9 @@ document.getElementById('btn-list').addEventListener('click', function () {
     '<button type="button" id="a-key">Pl@ntNet key</button>' +
     '<button type="button" class="save" id="a-close">Done</button>';
   document.getElementById('a-key').addEventListener('click', function () { pnAskKey(); });
+  document.getElementById('a-test').addEventListener('click', function () {
+    pnTest(document.getElementById('diag'));
+  });
   document.getElementById('a-close').addEventListener('click', closeSheet);
   // Assigned, not added: List can be opened repeatedly, and addEventListener
   // would stack a new handler each time so one tap fired several.
