@@ -1250,15 +1250,32 @@ function pnSetKey(k) {
   try {
     if (k) localStorage.setItem(PN_KEY_STORE, k);
     else localStorage.removeItem(PN_KEY_STORE);
-  } catch (e) {}
+    // Read it straight back. Private Browsing accepts setItem and then throws
+    // or returns nothing on read, so "saved" has to mean "saved and found
+    // again" -- otherwise the app reports success and asks for the key again
+    // on the very next tap.
+    if (k && localStorage.getItem(PN_KEY_STORE) !== k) {
+      alert('The key could not be saved on this device.\n\n' +
+            'If this is a Private Browsing tab, open the site in a normal tab.');
+      return false;
+    }
+    return true;
+  } catch (e) {
+    alert('The key could not be saved on this device.\n\n' + (e.message || ''));
+    return false;
+  }
 }
 function pnAskKey() {
   var k = prompt(
     'Pl@ntNet API key — from my.plantnet.org → Settings → API.\n\n' +
     'Stored on this device only. Leave blank to clear it.', pnKey());
   if (k === null) return false;                 // cancelled
-  pnSetKey(k.trim());
-  return !!k.trim();
+  k = k.trim();
+  if (!pnSetKey(k)) return false;
+  // Confirmed out loud, because the previous version gave no sign either way
+  // and the next thing it did was ask again.
+  if (k) alert('Key saved on this device (…' + k.slice(-4) + ').');
+  return !!k;
 }
 
 var ORGANS = [
@@ -1689,7 +1706,14 @@ document.getElementById('btn-list').addEventListener('click', function () {
     return a + (Array.isArray(f.properties.picture_id) ? f.properties.picture_id.length : 0);
   }, 0);
   var useEl = document.getElementById('use');
-  useEl.textContent = nShots + ' photo' + (nShots === 1 ? '' : 's') + ' stored';
+  // Whether the key is held is otherwise invisible: the only way to find out
+  // was to try an identification and see whether it asked. Storage is also
+  // per-context on iOS -- Safari and a Home Screen launch do not share it --
+  // so "I already entered it" and "this app has it" are genuinely different
+  // questions, and this answers the second one.
+  var k = pnKey();
+  useEl.textContent = nShots + ' photo' + (nShots === 1 ? '' : 's') + ' stored' +
+    ' · Pl@ntNet key ' + (k ? 'set (…' + k.slice(-4) + ')' : 'NOT set');
   if (navigator.storage && navigator.storage.estimate) {
     navigator.storage.estimate().then(function (e) {
       if (!e || !e.usage) return;
