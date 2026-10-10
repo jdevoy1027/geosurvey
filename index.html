@@ -271,6 +271,13 @@
   }
   .organs button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
 
+  /* Above the point form, which is also .sheet. Both were z-index 11, and with
+     equal z-index the later element in the DOM wins -- the form is declared
+     after this one, so the results opened BEHIND it and tapping Identify
+     looked like it did nothing at all. */
+  #idscrim { z-index: 13; }
+  #idbox { z-index: 14; }
+
   .idlist { padding: 2px 0 8px; }
   .idrow {
     display: flex; gap: 10px; align-items: baseline; width: 100%; text-align: left;
